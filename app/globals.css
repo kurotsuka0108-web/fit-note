@@ -1,26 +1,80 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* ------------------------------------------------------------------ */
+/* FIT·NOTE グローバルスタイル                                          */
+/* テーマは next-themes が <html> に付与する .dark / .light で切替。      */
+/* 端末外の背景(--fn-page)だけ CSS変数で持ち、FOUCを防ぐ。              */
+/* 各画面内のトークンは lib/theme.ts + useC() がインラインstyleで供給。  */
+/* ------------------------------------------------------------------ */
+:root,
+.dark {
+  --fn-page: #05070c;
+  --fn-fg: #f1f5f9;
+}
+.light {
+  --fn-page: #dbe2ea;
+  --fn-fg: #0f172a;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  background: var(--fn-page);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--fn-page);
+  color: var(--fn-fg);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  /* 数値表示は等幅数字（仕様 §2） */
+  font-variant-numeric: tabular-nums;
+  transition: background 0.3s;
+}
+
+/* スピナー */
+.fn-spin {
+  animation: fnspin 1s linear infinite;
+}
+@keyframes fnspin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* セット完了時に右からスライドイン（仕様 §3.2 横並びセット） */
+.fn-set-in {
+  animation: fnSetIn 0.28s ease;
+}
+@keyframes fnSetIn {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* スクロールバー非表示（端末風UI） */
+.fn-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+.fn-scroll {
+  scrollbar-width: none;
+}
+
+/* フォーカスリング（アクセシビリティ） */
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid #eab308;
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* prefers-reduced-motion でアニメーション無効化（仕様 §2） */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
 }

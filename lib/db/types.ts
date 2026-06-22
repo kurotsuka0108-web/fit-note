@@ -1,0 +1,55 @@
+// NOTE（筋トレノート）のドメイン型。UI と各リポジトリ実装が共有する。
+
+export type Library = Record<string, string[]>; // { 部位: [種目名, ...] }
+
+// ドロップセットの1段（重量×レップ）。bodyweight はセット単位なので段には持たせない。
+export type SetStage = { weight: number; reps: number };
+
+export type WorkoutSet = {
+  id: string;
+  weight: number; // 先頭段(トップセット)の重量。bodyweight=true のときは加重量(0=純粋な自重)
+  reps: number; // 先頭段のレップ
+  bodyweight: boolean; // 自重種目か（true なら weight/各段は加重量）
+  drops: SetStage[]; // 2段目以降（ドロップ）。通常セットは空配列
+};
+
+// 新規セット追加時のペイロード（ドロップ段を含む）
+export type NewSet = { weight: number; reps: number; bodyweight: boolean; drops: SetStage[] };
+
+export type WorkoutLog = {
+  id: string;
+  date: string; // YYYY-MM-DD
+  name: string; // 種目名
+  part: string; // 部位
+  order: number;
+  sets: WorkoutSet[];
+};
+
+// 前回セッションの実績（プリセット用）。w=重量(加重量), r=レップ, s=セット数, bw=自重か
+export type LastSession = { w: number; r: number; s: number; bw: boolean } | null;
+
+/**
+ * NOTE のデータアクセス契約。Supabase 実装と localStorage 実装が共通で満たす。
+ * すべて非同期（Supabase に合わせる。local 実装も Promise を返す）。
+ */
+export interface NoteRepo {
+  /** 種目ライブラリ（共通テンプレ + ユーザー追加）を部位別に返す */
+  getLibrary(): Promise<Library>;
+  /** オリジナル種目をライブラリへ永続化（重複は無視） */
+  addCustomExercise(part: string, name: string): Promise<void>;
+
+  /** 指定日の種目ログ（セット込み）を order 昇順で返す */
+  getLogs(date: string): Promise<WorkoutLog[]>;
+  /** 当日ログに種目を追加して、作成したログを返す */
+  addLog(date: string, name: string, part: string): Promise<WorkoutLog>;
+  /** 種目ログを削除（セットも連動削除） */
+  removeLog(logId: string): Promise<void>;
+
+  /** ログにセットを1件追加して、作成したセットを返す（ドロップ段を含む） */
+  addSet(logId: string, set: NewSet): Promise<WorkoutSet>;
+  /** セットを1件削除 */
+  removeSet(logId: string, setId: string): Promise<void>;
+
+  /** 指定日より前の最新セッションの実績を返す（無ければ null） */
+  getLastSession(date: string, name: string): Promise<LastSession>;
+}
