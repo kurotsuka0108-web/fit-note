@@ -12,6 +12,7 @@ type LogRow = {
   name: string;
   body_part: string;
   order: number;
+  group_id: string | null;
   workout_sets:
     | { id: string; weight: number; reps: number; set_index: number; bodyweight: boolean; drops: SetStage[] | null }[]
     | null;
@@ -27,10 +28,10 @@ function toLog(row: LogRow): WorkoutLog {
       bodyweight: s.bodyweight,
       drops: (s.drops ?? []).map((d) => ({ weight: Number(d.weight), reps: d.reps })),
     }));
-  return { id: row.id, date: row.date, name: row.name, part: row.body_part, order: row.order, sets };
+  return { id: row.id, date: row.date, name: row.name, part: row.body_part, order: row.order, groupId: row.group_id ?? null, sets };
 }
 
-const LOG_SELECT = 'id,date,name,body_part,order:"order",workout_sets(id,weight,reps,set_index,bodyweight,drops)';
+const LOG_SELECT = 'id,date,name,body_part,order:"order",group_id,workout_sets(id,weight,reps,set_index,bodyweight,drops)';
 
 export class SupabaseNoteRepo implements NoteRepo {
   constructor(private sb: SupabaseClient) {}
@@ -89,6 +90,21 @@ export class SupabaseNoteRepo implements NoteRepo {
 
   async removeLog(logId: string): Promise<void> {
     const { error } = await this.sb.from("workout_logs").delete().eq("id", logId);
+    if (error) throw error;
+  }
+
+  async createGroup(logIds: string[]): Promise<string> {
+    const groupId =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const { error } = await this.sb.from("workout_logs").update({ group_id: groupId }).in("id", logIds);
+    if (error) throw error;
+    return groupId;
+  }
+
+  async ungroup(groupId: string): Promise<void> {
+    const { error } = await this.sb.from("workout_logs").update({ group_id: null }).eq("group_id", groupId);
     if (error) throw error;
   }
 

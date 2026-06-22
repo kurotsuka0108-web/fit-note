@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus } from "lucide-react";
+import { Link2, Plus, Unlink } from "lucide-react";
 import { useC } from "@/lib/use-tokens";
 import { ON_GOLD } from "@/lib/theme";
 import { currentWeek, todayYmd } from "@/lib/date";
@@ -14,6 +14,36 @@ import {
 } from "@/lib/db";
 import { ExerciseCard } from "./ExerciseCard";
 import { AddExerciseSheet } from "./AddExerciseSheet";
+import { SupersetSheet } from "./SupersetSheet";
+
+// 描画用ブロック: 単独種目 or スーパーセット（出現順にクラスタリング）
+type Block =
+  | { kind: "single"; log: WorkoutLog; num: number }
+  | { kind: "group"; groupId: string; label: string; items: { log: WorkoutLog; num: number }[] };
+
+// ログ配列を、groupId が初出した位置にグループを束ねたブロック列へ変換する。
+// カード番号(num)は画面の見た目の並び順に振り直す。
+function toBlocks(logs: WorkoutLog[]): Block[] {
+  const blocks: Block[] = [];
+  const byGroup = new Map<string, Extract<Block, { kind: "group" }>>();
+  let num = 0;
+  let letter = 0;
+  for (const log of logs) {
+    num += 1;
+    if (log.groupId) {
+      let b = byGroup.get(log.groupId);
+      if (!b) {
+        b = { kind: "group", groupId: log.groupId, label: String.fromCharCode(65 + letter++), items: [] };
+        byGroup.set(log.groupId, b);
+        blocks.push(b);
+      }
+      b.items.push({ log, num });
+    } else {
+      blocks.push({ kind: "single", log, num });
+    }
+  }
+  return blocks;
+}
 
 // drops = 確定前のドロップ段（トップセット側）。完了時に現在値が最終段として連結される。
 type Draft = { weight: number; reps: number; bodyweight: boolean; drops: SetStage[] };
@@ -40,6 +70,7 @@ export function NoteScreen() {
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [lasts, setLasts] = useState<Record<string, LastSession>>({});
   const [adding, setAdding] = useState(false);
+  const [grouping, setGrouping] = useState(false);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
@@ -129,11 +160,41 @@ export function NoteScreen() {
   };
 
   const removeLog = async (id: string) => {
+    const removed = logs.find((l) => l.id === id);
     try {
       await repo.removeLog(id);
-      setLogs((ls) => ls.filter((l) => l.id !== id));
+      let next = logs.filter((l) => l.id !== id);
+      // グループのメンバーが1つだけになったらスーパーセットを解散する
+      if (removed?.groupId) {
+        const left = next.filter((l) => l.groupId === removed.groupId);
+        if (left.length < 2) {
+          await repo.ungroup(removed.groupId);
+          next = next.map((l) => (l.groupId === removed.groupId ? { ...l, groupId: null } : l));
+        }
+      }
+      setLogs(next);
       setDrafts((p) => { const n = { ...p }; delete n[id]; return n; });
       setLasts((p) => { const n = { ...p }; delete n[id]; return n; });
+    } catch (e) {
+      fail(e);
+    }
+  };
+
+  /* ── スーパーセット（種目のグループ化） ── */
+  const makeGroup = async (logIds: string[]) => {
+    setGrouping(false);
+    try {
+      const groupId = await repo.createGroup(logIds);
+      setLogs((ls) => ls.map((l) => (logIds.includes(l.id) ? { ...l, groupId } : l)));
+    } catch (e) {
+      fail(e);
+    }
+  };
+
+  const dissolveGroup = async (groupId: string) => {
+    try {
+      await repo.ungroup(groupId);
+      setLogs((ls) => ls.map((l) => (l.groupId === groupId ? { ...l, groupId: null } : l)));
     } catch (e) {
       fail(e);
     }
@@ -163,6 +224,25 @@ export function NoteScreen() {
   };
 
   const todayNames = logs.map((l) => l.name);
+  const blocks = toBlocks(logs);
+
+  // 1種目分のカード（単独・グループ内で共通）
+  const renderCard = (l: WorkoutLog, num: number) => (
+    <ExerciseCard
+      key={l.id} index={num} log={l}
+      draftWeight={drafts[l.id]?.weight ?? NEW_DRAFT.weight}
+      draftReps={drafts[l.id]?.reps ?? NEW_DRAFT.reps}
+      bodyweight={drafts[l.id]?.bodyweight ?? false}
+      drops={drafts[l.id]?.drops ?? []}
+      last={lasts[l.id] ?? null}
+      onStepW={(d) => stepW(l.id, d)} onSetW={(v) => setW(l.id, v)}
+      onStepR={(d) => stepR(l.id, d)} onSetR={(v) => setR(l.id, v)}
+      onToggleBW={() => toggleBW(l.id)}
+      onAddDrop={() => addDrop(l.id)} onClearDrops={() => clearDrops(l.id)}
+      onComplete={() => completeSet(l.id)} onRemoveSet={(sid) => removeSet(l.id, sid)}
+      onPreset={() => presetLast(l.id)} onRemove={() => removeLog(l.id)}
+    />
+  );
 
   return (
     // min-height: 100% でボディ領域いっぱいに広げ、AddExerciseSheet（absolute inset-0）の
@@ -201,22 +281,26 @@ export function NoteScreen() {
       )}
 
       <div className="space-y-3">
-        {logs.map((l, i) => (
-          <ExerciseCard
-            key={l.id} index={i + 1} log={l}
-            draftWeight={drafts[l.id]?.weight ?? NEW_DRAFT.weight}
-            draftReps={drafts[l.id]?.reps ?? NEW_DRAFT.reps}
-            bodyweight={drafts[l.id]?.bodyweight ?? false}
-            drops={drafts[l.id]?.drops ?? []}
-            last={lasts[l.id] ?? null}
-            onStepW={(d) => stepW(l.id, d)} onSetW={(v) => setW(l.id, v)}
-            onStepR={(d) => stepR(l.id, d)} onSetR={(v) => setR(l.id, v)}
-            onToggleBW={() => toggleBW(l.id)}
-            onAddDrop={() => addDrop(l.id)} onClearDrops={() => clearDrops(l.id)}
-            onComplete={() => completeSet(l.id)} onRemoveSet={(sid) => removeSet(l.id, sid)}
-            onPreset={() => presetLast(l.id)} onRemove={() => removeLog(l.id)}
-          />
-        ))}
+        {blocks.map((b) =>
+          b.kind === "single" ? (
+            renderCard(b.log, b.num)
+          ) : (
+            <div key={b.groupId} className="rounded-2xl p-2"
+              style={{ background: "rgba(234,179,8,.06)", border: `1px solid ${C.accent}` }}>
+              <div className="flex items-center justify-between px-2 pt-1 pb-2">
+                <span className="flex items-center gap-1.5" style={{ color: C.accent, fontSize: 11, fontWeight: 800, letterSpacing: 1 }}>
+                  <Link2 size={14} /> SUPERSET {b.label} · {b.items.length}種目
+                </span>
+                <button onClick={() => dissolveGroup(b.groupId)} className="flex items-center gap-1" style={{ color: C.lo, fontSize: 11, fontWeight: 700 }}>
+                  <Unlink size={13} /> 解除
+                </button>
+              </div>
+              <div className="space-y-2">
+                {b.items.map((it) => renderCard(it.log, it.num))}
+              </div>
+            </div>
+          ),
+        )}
         {!loading && logs.length === 0 && (
           <div className="rounded-2xl p-6 text-center" style={{ background: C.surface, border: `1px dashed ${C.border}` }}>
             <p style={{ color: C.mid, fontSize: 13, lineHeight: 1.7 }}>まだ種目がありません。<br />下のボタンから追加しましょう。</p>
@@ -235,11 +319,24 @@ export function NoteScreen() {
         <Plus size={20} /> 種目を追加
       </button>
 
+      {/* スーパーセット化は2種目以上あるときだけ */}
+      {logs.length >= 2 && (
+        <button onClick={() => setGrouping(true)}
+          className="w-full rounded-xl flex items-center justify-center gap-2 mt-2"
+          style={{ minHeight: 48, background: "transparent", color: C.mid, fontWeight: 700, fontSize: 14, border: `1px dashed ${C.border}` }}>
+          <Link2 size={18} /> スーパーセットを組む
+        </button>
+      )}
+
       {adding && (
         <AddExerciseSheet
           library={library} todayNames={todayNames}
           onPick={addToday} onAddCustom={addCustom} onClose={() => setAdding(false)}
         />
+      )}
+
+      {grouping && (
+        <SupersetSheet logs={logs} onConfirm={makeGroup} onClose={() => setGrouping(false)} />
       )}
     </div>
   );

@@ -59,9 +59,10 @@ export class LocalNoteRepo implements NoteRepo {
     return load()
       .logs.filter((l) => l.date === date)
       .sort((a, b) => a.order - b.order)
-      // 旧データ（bodyweight / drops 未保存）を正規化
+      // 旧データ（bodyweight / drops / groupId 未保存）を正規化
       .map((l) => ({
         ...l,
+        groupId: l.groupId ?? null,
         sets: l.sets.map((s) => ({ ...s, bodyweight: s.bodyweight ?? false, drops: s.drops ?? [] })),
       }));
   }
@@ -75,6 +76,7 @@ export class LocalNoteRepo implements NoteRepo {
       name,
       part,
       order: sameDay.length,
+      groupId: null,
       sets: [],
     };
     store.logs.push(log);
@@ -85,6 +87,20 @@ export class LocalNoteRepo implements NoteRepo {
   async removeLog(logId: string): Promise<void> {
     const store = load();
     store.logs = store.logs.filter((l) => l.id !== logId);
+    save(store);
+  }
+
+  async createGroup(logIds: string[]): Promise<string> {
+    const store = load();
+    const groupId = uid();
+    for (const l of store.logs) if (logIds.includes(l.id)) l.groupId = groupId;
+    save(store);
+    return groupId;
+  }
+
+  async ungroup(groupId: string): Promise<void> {
+    const store = load();
+    for (const l of store.logs) if (l.groupId === groupId) l.groupId = null;
     save(store);
   }
 

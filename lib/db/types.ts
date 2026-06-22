@@ -22,6 +22,8 @@ export type WorkoutLog = {
   name: string; // 種目名
   part: string; // 部位
   order: number;
+  // 同一 groupId のログはスーパーセット（交互に実施する種目の束）。null=単独種目。
+  groupId: string | null;
   sets: WorkoutSet[];
 };
 
@@ -44,6 +46,11 @@ export interface NoteRepo {
   addLog(date: string, name: string, part: string): Promise<WorkoutLog>;
   /** 種目ログを削除（セットも連動削除） */
   removeLog(logId: string): Promise<void>;
+
+  /** 指定ログ群を1つのスーパーセットにまとめ、割り当てた groupId を返す */
+  createGroup(logIds: string[]): Promise<string>;
+  /** スーパーセットを解除（対象 groupId のログを単独に戻す） */
+  ungroup(groupId: string): Promise<void>;
 
   /** ログにセットを1件追加して、作成したセットを返す（ドロップ段を含む） */
   addSet(logId: string, set: NewSet): Promise<WorkoutSet>;
