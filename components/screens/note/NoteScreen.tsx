@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, Link2, Plus, Unlink, X } from "lucide-react";
+import { Check, Link2, Plus, Unlink } from "lucide-react";
 import { useC } from "@/lib/use-tokens";
 import { ON_GOLD } from "@/lib/theme";
 import { currentWeek, todayYmd } from "@/lib/date";
@@ -69,8 +69,6 @@ export function NoteScreen() {
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [lasts, setLasts] = useState<Record<string, LastSession>>({});
   const [adding, setAdding] = useState(false);
-  const [selecting, setSelecting] = useState(false); // スーパーセット選択モード
-  const [picked, setPicked] = useState<string[]>([]); // 選択中の種目ID
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
@@ -195,20 +193,26 @@ export function NoteScreen() {
   };
 
   /* ── スーパーセット（種目のグループ化） ── */
-  const startSelecting = () => { setPicked([]); setSelecting(true); };
-  const cancelSelecting = () => { setSelecting(false); setPicked([]); };
-  const togglePick = (id: string) =>
-    setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
-
-  // 選択中の種目を1つのスーパーセットにまとめる（2種目以上で確定）
-  const confirmGroup = async () => {
-    if (picked.length < 2) return;
-    const ids = picked;
-    setSelecting(false);
-    setPicked([]);
+  // 「種目を追加」シートで選んだ複数種目を当日ログへ追加し、1つのスーパーセットにまとめる。
+  const addSuperset = async (items: { name: string; part: string }[]) => {
+    setAdding(false);
+    if (items.length < 2) return;
     try {
+      const created: WorkoutLog[] = [];
+      for (const it of items) created.push(await repo.addLog(active, it.name, it.part));
+      const ids = created.map((l) => l.id);
       const groupId = await repo.createGroup(ids);
-      setLogs((ls) => ls.map((l) => (ids.includes(l.id) ? { ...l, groupId } : l)));
+      const withGroup = created.map((l) => ({ ...l, groupId }));
+      setLogs((ls) => [...ls, ...withGroup]);
+      setDrafts((p) => {
+        const n = { ...p };
+        for (const l of created) n[l.id] = { ...NEW_DRAFT };
+        return n;
+      });
+      const lastEntries = await Promise.all(
+        created.map(async (l) => [l.id, await repo.getLastSession(active, l.name)] as const),
+      );
+      setLasts((p) => ({ ...p, ...Object.fromEntries(lastEntries) }));
     } catch (e) {
       fail(e);
     }
@@ -250,58 +254,22 @@ export function NoteScreen() {
   const blocks = toBlocks(logs);
 
   // 1種目分のカード（単独・グループ内で共通）
-  const renderCard = (l: WorkoutLog, num: number) => {
-    const card = (
-      <ExerciseCard
-        index={num} log={l}
-        draftWeight={drafts[l.id]?.weight ?? NEW_DRAFT.weight}
-        draftReps={drafts[l.id]?.reps ?? NEW_DRAFT.reps}
-        bodyweight={drafts[l.id]?.bodyweight ?? false}
-        drops={drafts[l.id]?.drops ?? []}
-        last={lasts[l.id] ?? null}
-        onStepW={(d) => stepW(l.id, d)} onSetW={(v) => setW(l.id, v)}
-        onStepR={(d) => stepR(l.id, d)} onSetR={(v) => setR(l.id, v)}
-        onToggleBW={() => toggleBW(l.id)}
-        onAddDrop={() => addDrop(l.id)} onClearDrops={() => clearDrops(l.id)}
-        onComplete={() => completeSet(l.id)} onRemoveSet={(sid) => removeSet(l.id, sid)}
-        onPreset={() => presetLast(l.id)} onRemove={() => removeLog(l.id)}
-      />
-    );
-    if (!selecting) return <div key={l.id}>{card}</div>;
-
-    // 選択モード: カード全体を覆うオーバーレイでタップ選択。グループ済みは選択不可。
-    const canSelect = !l.groupId;
-    const sel = picked.includes(l.id);
-    return (
-      <div key={l.id} style={{ position: "relative" }}>
-        {card}
-        <button
-          onClick={() => canSelect && togglePick(l.id)}
-          aria-label={canSelect ? `${l.name}を選択` : `${l.name}はグループ済み`}
-          aria-pressed={sel}
-          style={{
-            position: "absolute", inset: 0, borderRadius: 16,
-            display: "flex", alignItems: "flex-start", justifyContent: "flex-end", padding: 10,
-            cursor: canSelect ? "pointer" : "not-allowed",
-            background: sel ? "rgba(234,179,8,.16)" : canSelect ? "transparent" : "rgba(5,7,12,.55)",
-            border: `2px solid ${sel ? C.accent : "transparent"}`,
-          }}>
-          {canSelect ? (
-            <span className="rounded-full flex items-center justify-center"
-              style={{
-                width: 28, height: 28, flexShrink: 0,
-                background: sel ? C.accent : C.surface,
-                border: `2px solid ${sel ? C.accent : C.border}`,
-              }}>
-              {sel && <Check size={18} color={ON_GOLD} />}
-            </span>
-          ) : (
-            <span className="rounded px-1.5 py-0.5" style={{ background: C.surface, color: C.lo, fontSize: 10, fontWeight: 800 }}>グループ済み</span>
-          )}
-        </button>
-      </div>
-    );
-  };
+  const renderCard = (l: WorkoutLog, num: number) => (
+    <ExerciseCard
+      key={l.id} index={num} log={l}
+      draftWeight={drafts[l.id]?.weight ?? NEW_DRAFT.weight}
+      draftReps={drafts[l.id]?.reps ?? NEW_DRAFT.reps}
+      bodyweight={drafts[l.id]?.bodyweight ?? false}
+      drops={drafts[l.id]?.drops ?? []}
+      last={lasts[l.id] ?? null}
+      onStepW={(d) => stepW(l.id, d)} onSetW={(v) => setW(l.id, v)}
+      onStepR={(d) => stepR(l.id, d)} onSetR={(v) => setR(l.id, v)}
+      onToggleBW={() => toggleBW(l.id)}
+      onAddDrop={() => addDrop(l.id)} onClearDrops={() => clearDrops(l.id)}
+      onComplete={() => completeSet(l.id)} onRemoveSet={(sid) => removeSet(l.id, sid)}
+      onPreset={() => presetLast(l.id)} onRemove={() => removeLog(l.id)}
+    />
+  );
 
   return (
     // min-height: 100% でボディ領域いっぱいに広げ、AddExerciseSheet（absolute inset-0）の
@@ -333,39 +301,6 @@ export function NoteScreen() {
         <span style={{ color: C.lo, fontSize: 11 }}>{logs.length}種目</span>
       </div>
 
-      {/* スーパーセット操作（リスト上部）。種目が2つ以上で表示。 */}
-      {logs.length >= 2 && !selecting && (
-        <button onClick={startSelecting}
-          className="w-full rounded-xl flex items-center justify-center gap-2 mb-3"
-          style={{ minHeight: 48, background: "transparent", color: C.mid, fontWeight: 700, fontSize: 14, border: `1px dashed ${C.border}` }}>
-          <Link2 size={18} /> スーパーセットを組む
-        </button>
-      )}
-      {selecting && (
-        <div className="rounded-xl px-3 py-2 mb-3 flex items-center justify-between gap-2"
-          style={{ background: "rgba(234,179,8,.10)", border: `1px solid ${C.accent}` }}>
-          <span style={{ color: C.hi, fontSize: 12, fontWeight: 700 }}>
-            束ねる種目をタップ <span style={{ color: C.accent, fontWeight: 800 }}>（{picked.length}）</span>
-          </span>
-          <div className="flex items-center gap-2" style={{ flexShrink: 0 }}>
-            <button onClick={cancelSelecting} className="rounded-lg px-3 flex items-center gap-1"
-              style={{ minHeight: 36, background: C.tactical, color: C.mid, fontSize: 12, fontWeight: 700, border: `1px solid ${C.border}` }}>
-              <X size={14} /> キャンセル
-            </button>
-            <button onClick={confirmGroup} disabled={picked.length < 2}
-              className="rounded-lg px-3 flex items-center gap-1"
-              style={{
-                minHeight: 36, fontSize: 12, fontWeight: 800,
-                background: picked.length >= 2 ? C.accent : C.tactical,
-                color: picked.length >= 2 ? ON_GOLD : C.lo,
-                border: picked.length >= 2 ? "none" : `1px solid ${C.border}`,
-              }}>
-              <Link2 size={14} /> グループ化
-            </button>
-          </div>
-        </div>
-      )}
-
       {err && (
         <p className="mb-3 rounded-md px-2 py-1 text-center" style={{ color: "#fb7185", fontSize: 11, background: "rgba(251,113,133,.10)" }}>
           {err}
@@ -383,23 +318,19 @@ export function NoteScreen() {
                 <span className="flex items-center gap-1.5" style={{ color: C.accent, fontSize: 11, fontWeight: 800, letterSpacing: 1 }}>
                   <Link2 size={14} /> SUPERSET {b.label} · {b.items.length}種目
                 </span>
-                {!selecting && (
-                  <button onClick={() => dissolveGroup(b.groupId)} className="flex items-center gap-1" style={{ color: C.lo, fontSize: 11, fontWeight: 700 }}>
-                    <Unlink size={13} /> 解除
-                  </button>
-                )}
+                <button onClick={() => dissolveGroup(b.groupId)} className="flex items-center gap-1" style={{ color: C.lo, fontSize: 11, fontWeight: 700 }}>
+                  <Unlink size={13} /> 解除
+                </button>
               </div>
               <div className="space-y-2">
                 {b.items.map((it) => renderCard(it.log, it.num))}
               </div>
               {/* スーパーセットを1ラウンド = 全種目を現在値でまとめて記録 */}
-              {!selecting && (
-                <button onClick={() => completeGroup(b.groupId)}
-                  className="w-full rounded-xl flex items-center justify-center gap-2 mt-2"
-                  style={{ minHeight: 52, background: C.accent, color: ON_GOLD, fontWeight: 800, fontSize: 15 }}>
-                  <Check size={18} /> まとめてセット完了（{b.items.length}種目）
-                </button>
-              )}
+              <button onClick={() => completeGroup(b.groupId)}
+                className="w-full rounded-xl flex items-center justify-center gap-2 mt-2"
+                style={{ minHeight: 52, background: C.accent, color: ON_GOLD, fontWeight: 800, fontSize: 15 }}>
+                <Check size={18} /> まとめてセット完了（{b.items.length}種目）
+              </button>
             </div>
           ),
         )}
@@ -415,19 +346,16 @@ export function NoteScreen() {
         )}
       </div>
 
-      {/* 選択モード中は種目追加を隠す（タップ選択に集中させる） */}
-      {!selecting && (
-        <button onClick={() => setAdding(true)}
-          className="w-full rounded-xl flex items-center justify-center gap-2 mt-3"
-          style={{ minHeight: 56, background: C.tactical, color: C.accent, fontWeight: 800, fontSize: 16, border: `1px solid ${C.border}` }}>
-          <Plus size={20} /> 種目を追加
-        </button>
-      )}
+      <button onClick={() => setAdding(true)}
+        className="w-full rounded-xl flex items-center justify-center gap-2 mt-3"
+        style={{ minHeight: 56, background: C.tactical, color: C.accent, fontWeight: 800, fontSize: 16, border: `1px solid ${C.border}` }}>
+        <Plus size={20} /> 種目を追加
+      </button>
 
       {adding && (
         <AddExerciseSheet
           library={library} todayNames={todayNames}
-          onPick={addToday} onAddCustom={addCustom} onClose={() => setAdding(false)}
+          onPick={addToday} onAddCustom={addCustom} onAddSuperset={addSuperset} onClose={() => setAdding(false)}
         />
       )}
     </div>
