@@ -43,6 +43,7 @@ export function AppShell() {
       className="flex items-center justify-center p-4"
     >
       <div
+        id="fn-frame"
         className="relative flex flex-col overflow-hidden"
         style={{
           width: "100%", maxWidth: 390, height: 800, maxHeight: "92vh",

@@ -120,6 +120,20 @@ export class LocalNoteRepo implements NoteRepo {
     return created;
   }
 
+  async updateSet(logId: string, setId: string, set: NewSet): Promise<WorkoutSet> {
+    const store = load();
+    const log = store.logs.find((l) => l.id === logId);
+    if (!log) throw new Error("ログが見つかりません");
+    const target = log.sets.find((s) => s.id === setId);
+    if (!target) throw new Error("セットが見つかりません");
+    target.weight = set.weight;
+    target.reps = set.reps;
+    target.bodyweight = set.bodyweight;
+    target.drops = set.drops;
+    save(store);
+    return { ...target };
+  }
+
   async removeSet(logId: string, setId: string): Promise<void> {
     const store = load();
     const log = store.logs.find((l) => l.id === logId);

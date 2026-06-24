@@ -54,6 +54,8 @@ export interface NoteRepo {
 
   /** ログにセットを1件追加して、作成したセットを返す（ドロップ段を含む） */
   addSet(logId: string, set: NewSet): Promise<WorkoutSet>;
+  /** 既存セットを上書き更新して、更新後のセットを返す（重量・レップ・ドロップ段の編集） */
+  updateSet(logId: string, setId: string, set: NewSet): Promise<WorkoutSet>;
   /** セットを1件削除 */
   removeSet(logId: string, setId: string): Promise<void>;
 

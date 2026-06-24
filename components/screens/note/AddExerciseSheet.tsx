@@ -5,6 +5,7 @@ import { Check, Link2, Plus, X } from "lucide-react";
 import { useC } from "@/lib/use-tokens";
 import { ON_GOLD } from "@/lib/theme";
 import { BODY_PARTS, type Library } from "@/lib/db";
+import { FramePortal } from "./FramePortal";
 
 type Picked = { name: string; part: string };
 
@@ -43,6 +44,7 @@ export function AddExerciseSheet({
   const confirmSuper = () => { if (picked.length >= 2) onAddSuperset(picked); };
 
   return (
+    <FramePortal>
     <div className="absolute inset-0 flex items-end" style={{ background: C.scrim, zIndex: 30 }} onClick={onClose}>
       <div className="w-full rounded-t-3xl flex flex-col"
         style={{
@@ -168,5 +170,6 @@ export function AddExerciseSheet({
         )}
       </div>
     </div>
+    </FramePortal>
   );
 }

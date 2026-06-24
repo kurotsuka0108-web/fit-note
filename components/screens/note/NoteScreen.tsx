@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Link2, Plus, Unlink } from "lucide-react";
 import { useC } from "@/lib/use-tokens";
 import { ON_GOLD } from "@/lib/theme";
@@ -9,11 +9,14 @@ import {
   getNoteRepo,
   type LastSession,
   type Library,
+  type NewSet,
   type SetStage,
   type WorkoutLog,
+  type WorkoutSet,
 } from "@/lib/db";
 import { ExerciseCard } from "./ExerciseCard";
 import { AddExerciseSheet } from "./AddExerciseSheet";
+import { SetEditor } from "./SetEditor";
 
 // 描画用ブロック: 単独種目 or スーパーセット（出現順にクラスタリング）
 type Block =
@@ -69,8 +72,23 @@ export function NoteScreen() {
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [lasts, setLasts] = useState<Record<string, LastSession>>({});
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<{ logId: string; set: WorkoutSet; index: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+
+  // 追加直後にその種目カードへスクロールするための参照と対象ID（ref で管理し state 更新を避ける）
+  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const pendingScroll = useRef<string | null>(null);
+  const scrollToCard = (id: string) => { pendingScroll.current = id; };
+  useEffect(() => {
+    const id = pendingScroll.current;
+    if (!id) return;
+    const el = cardRefs.current[id];
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      pendingScroll.current = null;
+    }
+  }, [logs]);
 
   const fail = (e: unknown) => {
     console.error("[NoteScreen]", e);
@@ -126,6 +144,12 @@ export function NoteScreen() {
     setDrafts((p) => ({ ...p, [id]: { ...p[id], drops: [...p[id].drops, { weight: p[id].weight, reps: p[id].reps }] } }));
   const clearDrops = (id: string) =>
     setDrafts((p) => ({ ...p, [id]: { ...p[id], drops: [] } }));
+  // ドロップ段のレップを後から入力（#2: 重量先・レップ後）
+  const setDropReps = (id: string, index: number, reps: number) =>
+    setDrafts((p) => ({
+      ...p,
+      [id]: { ...p[id], drops: p[id].drops.map((d, i) => (i === index ? { ...d, reps: Math.max(0, Math.round(reps)) } : d)) },
+    }));
   const presetLast = (id: string) => {
     const l = lasts[id];
     if (l) setDrafts((p) => ({ ...p, [id]: { weight: l.w, reps: l.r, bodyweight: l.bw, drops: [] } }));
@@ -166,6 +190,19 @@ export function NoteScreen() {
     try {
       await repo.removeSet(id, setId);
       setLogs((ls) => ls.map((l) => (l.id === id ? { ...l, sets: l.sets.filter((s) => s.id !== setId) } : l)));
+    } catch (e) {
+      fail(e);
+    }
+  };
+
+  // 完了セットの編集を保存（#1）
+  const saveSetEdit = async (patch: NewSet) => {
+    if (!editing) return;
+    const { logId, set } = editing;
+    setEditing(null);
+    try {
+      const updated = await repo.updateSet(logId, set.id, patch);
+      setLogs((ls) => ls.map((l) => (l.id === logId ? { ...l, sets: l.sets.map((s) => (s.id === set.id ? updated : s)) } : l)));
     } catch (e) {
       fail(e);
     }
@@ -213,6 +250,7 @@ export function NoteScreen() {
         created.map(async (l) => [l.id, await repo.getLastSession(active, l.name)] as const),
       );
       setLasts((p) => ({ ...p, ...Object.fromEntries(lastEntries) }));
+      if (created[0]) scrollToCard(created[0].id); // #4: 追加した先頭種目へスクロール
     } catch (e) {
       fail(e);
     }
@@ -235,6 +273,7 @@ export function NoteScreen() {
       setLogs((ls) => [...ls, log]);
       setDrafts((p) => ({ ...p, [log.id]: { ...NEW_DRAFT } }));
       setLasts((p) => ({ ...p, [log.id]: last }));
+      scrollToCard(log.id); // #4: 追加した種目へスクロール
     } catch (e) {
       fail(e);
     }
@@ -253,22 +292,26 @@ export function NoteScreen() {
   const todayNames = logs.map((l) => l.name);
   const blocks = toBlocks(logs);
 
-  // 1種目分のカード（単独・グループ内で共通）
+  // 1種目分のカード（単独・グループ内で共通）。ラッパー div に ref を付けて追加後スクロールに使う。
   const renderCard = (l: WorkoutLog, num: number) => (
-    <ExerciseCard
-      key={l.id} index={num} log={l}
-      draftWeight={drafts[l.id]?.weight ?? NEW_DRAFT.weight}
-      draftReps={drafts[l.id]?.reps ?? NEW_DRAFT.reps}
-      bodyweight={drafts[l.id]?.bodyweight ?? false}
-      drops={drafts[l.id]?.drops ?? []}
-      last={lasts[l.id] ?? null}
-      onStepW={(d) => stepW(l.id, d)} onSetW={(v) => setW(l.id, v)}
-      onStepR={(d) => stepR(l.id, d)} onSetR={(v) => setR(l.id, v)}
-      onToggleBW={() => toggleBW(l.id)}
-      onAddDrop={() => addDrop(l.id)} onClearDrops={() => clearDrops(l.id)}
-      onComplete={() => completeSet(l.id)} onRemoveSet={(sid) => removeSet(l.id, sid)}
-      onPreset={() => presetLast(l.id)} onRemove={() => removeLog(l.id)}
-    />
+    <div key={l.id} ref={(el) => { cardRefs.current[l.id] = el; }} style={{ scrollMarginTop: 12 }}>
+      <ExerciseCard
+        index={num} log={l}
+        draftWeight={drafts[l.id]?.weight ?? NEW_DRAFT.weight}
+        draftReps={drafts[l.id]?.reps ?? NEW_DRAFT.reps}
+        bodyweight={drafts[l.id]?.bodyweight ?? false}
+        drops={drafts[l.id]?.drops ?? []}
+        last={lasts[l.id] ?? null}
+        onStepW={(d) => stepW(l.id, d)} onSetW={(v) => setW(l.id, v)}
+        onStepR={(d) => stepR(l.id, d)} onSetR={(v) => setR(l.id, v)}
+        onToggleBW={() => toggleBW(l.id)}
+        onAddDrop={() => addDrop(l.id)} onClearDrops={() => clearDrops(l.id)}
+        onSetDropReps={(i, v) => setDropReps(l.id, i, v)}
+        onComplete={() => completeSet(l.id)} onRemoveSet={(sid) => removeSet(l.id, sid)}
+        onEditSet={(s) => setEditing({ logId: l.id, set: s, index: l.sets.findIndex((x) => x.id === s.id) + 1 })}
+        onPreset={() => presetLast(l.id)} onRemove={() => removeLog(l.id)}
+      />
+    </div>
   );
 
   return (
@@ -356,6 +399,13 @@ export function NoteScreen() {
         <AddExerciseSheet
           library={library} todayNames={todayNames}
           onPick={addToday} onAddCustom={addCustom} onAddSuperset={addSuperset} onClose={() => setAdding(false)}
+        />
+      )}
+
+      {editing && (
+        <SetEditor
+          set={editing.set} index={editing.index}
+          onSave={saveSetEdit} onClose={() => setEditing(null)}
         />
       )}
     </div>

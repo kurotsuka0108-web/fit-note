@@ -1,20 +1,47 @@
 "use client";
 
-import { Fragment, useEffect, useRef } from "react";
-import { Check, ChevronsDown, Trash2, X } from "lucide-react";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { Check, ChevronsDown, Pencil, Trash2, X } from "lucide-react";
 import { useC } from "@/lib/use-tokens";
 import { ON_GOLD } from "@/lib/theme";
-import type { LastSession, WorkoutLog } from "@/lib/db";
+import type { LastSession, WorkoutLog, WorkoutSet } from "@/lib/db";
 import { Counter } from "./Counter";
 
 // 重量の表示テキスト（自重 / 自重+Xkg / Xkg）
 const wText = (w: number, bw: boolean) => (bw ? (w === 0 ? "自重" : `自重+${w}kg`) : `${w}kg`);
 
+/* ドロップ段のレップを後から入力する小さな編集フィールド（タップで直接入力）。 */
+function EditableReps({ reps, onSet }: { reps: number; onSet: (v: number) => void }) {
+  const C = useC();
+  const [editing, setEditing] = useState(false);
+  const [tmp, setTmp] = useState("");
+  const commit = () => {
+    const n = parseInt(tmp, 10);
+    if (Number.isFinite(n)) onSet(Math.max(0, n));
+    setEditing(false);
+  };
+  if (editing) {
+    return (
+      <input autoFocus type="number" inputMode="numeric" value={tmp}
+        onChange={(e) => setTmp(e.target.value)} onBlur={commit}
+        onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+        onClick={(e) => e.stopPropagation()}
+        style={{ width: 34, background: "transparent", color: C.accent, fontSize: 12, fontWeight: 800, outline: "none", borderBottom: `1px solid ${C.accent}`, textAlign: "center" }} />
+    );
+  }
+  return (
+    <button onClick={() => { setTmp(String(reps)); setEditing(true); }}
+      style={{ color: reps > 0 ? C.hi : C.lo, borderBottom: `1px dashed ${C.lo}` }}>
+      ×{reps}
+    </button>
+  );
+}
+
 /* 種目カード（仕様 §3.2）。横並びセット・Tactical Counter・前回プリセットを内包。 */
 export function ExerciseCard({
   index, log, draftWeight, draftReps, bodyweight, drops, last,
-  onStepW, onSetW, onStepR, onSetR, onToggleBW, onAddDrop, onClearDrops,
-  onComplete, onRemoveSet, onPreset, onRemove,
+  onStepW, onSetW, onStepR, onSetR, onToggleBW, onAddDrop, onClearDrops, onSetDropReps,
+  onComplete, onRemoveSet, onEditSet, onPreset, onRemove,
 }: {
   index: number;
   log: WorkoutLog;
@@ -30,8 +57,10 @@ export function ExerciseCard({
   onToggleBW: () => void;
   onAddDrop: () => void;
   onClearDrops: () => void;
+  onSetDropReps: (index: number, reps: number) => void;
   onComplete: () => void;
   onRemoveSet: (setId: string) => void;
+  onEditSet: (set: WorkoutSet) => void;
   onPreset: () => void;
   onRemove: () => void;
 }) {
@@ -85,10 +114,12 @@ export function ExerciseCard({
           return (
             <div key={s.id} className="fn-set-in flex-shrink-0 rounded-xl px-3 flex items-center gap-2"
               style={{ minHeight: 56, minWidth: 104, background: C.tactical, border: `1px solid ${C.border}` }}>
-              <div>
-                <p style={{ color: C.lo, fontSize: 9, fontWeight: 800, letterSpacing: 1 }}>
+              {/* タップで編集パネルを開く */}
+              <button onClick={() => onEditSet(s)} aria-label={`SET ${i + 1} を編集`} style={{ textAlign: "left" }}>
+                <p style={{ color: C.lo, fontSize: 9, fontWeight: 800, letterSpacing: 1 }} className="flex items-center gap-1">
                   SET {i + 1}
-                  {s.drops.length > 0 && <span style={{ color: C.accent }}> · DROP</span>}
+                  {s.drops.length > 0 && <span style={{ color: C.accent }}>· DROP</span>}
+                  <Pencil size={9} style={{ color: C.lo }} />
                 </p>
                 <p style={{ color: C.hi, fontSize: 14, fontWeight: 800, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
                   {stages.map((st, idx) => (
@@ -98,7 +129,7 @@ export function ExerciseCard({
                     </Fragment>
                   ))}
                 </p>
-              </div>
+              </button>
               <button onClick={() => onRemoveSet(s.id)} aria-label="セット削除" style={{ color: C.lo, marginLeft: "auto" }}>
                 <X size={13} />
               </button>
@@ -135,16 +166,17 @@ export function ExerciseCard({
         </div>
       </div>
 
-      {/* ドロップ連鎖の途中プレビュー */}
+      {/* ドロップ連鎖の途中プレビュー。重量で段を積んでから、各段の ×レップ をタップして後入力。 */}
       {drops.length > 0 && (
         <div className="rounded-xl px-3 py-2 mb-2 flex items-center gap-2"
           style={{ background: "rgba(234,179,8,.10)", border: `1px solid ${C.border}` }}>
           <span style={{ color: C.accent, fontSize: 10, fontWeight: 800, letterSpacing: 1, flexShrink: 0 }}>DROP</span>
-          <span style={{ color: C.hi, fontSize: 12, fontWeight: 700, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", overflowX: "auto" }} className="fn-scroll">
+          <span style={{ color: C.hi, fontSize: 12, fontWeight: 700, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", overflowX: "auto" }} className="fn-scroll flex items-center">
             {drops.map((d, i) => (
               <Fragment key={i}>
                 {i > 0 && <span style={{ color: C.mid, margin: "0 3px" }}>⤵</span>}
-                {wText(d.weight, bodyweight)}×{d.reps}
+                {wText(d.weight, bodyweight)}
+                <EditableReps reps={d.reps} onSet={(v) => onSetDropReps(i, v)} />
               </Fragment>
             ))}
             <span style={{ color: C.mid, margin: "0 3px" }}>⤵</span>
@@ -160,7 +192,7 @@ export function ExerciseCard({
         <button onClick={onAddDrop}
           className="rounded-xl flex items-center justify-center gap-1 px-3"
           style={{ minHeight: 56, background: C.tactical, color: C.accent, fontWeight: 800, fontSize: 14, border: `1px solid ${C.border}`, flexShrink: 0 }}>
-          <ChevronsDown size={18} /> ドロップ
+          <ChevronsDown size={18} /> 重量で段追加
         </button>
         <button onClick={onComplete}
           className="flex-1 rounded-xl flex items-center justify-center gap-2"

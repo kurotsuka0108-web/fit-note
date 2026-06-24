@@ -185,3 +185,58 @@ const EXERCISE_LIBRARY_SEED = {
 - [ ] 全体: ダーク／ライト切替が機能し、トークンが §2 と一致する
 - [ ] 全体: PWA としてホーム画面追加・全画面起動できる
 - [ ] 認証: デモログインで即操作開始できる
+
+---
+
+## 9. 実装進捗・引き継ぎメモ（最終更新: 2026-06-24）
+
+> 次に作業する人が「どこまで出来ているか」を把握するための生きたメモ。新機能を足したら追記すること。
+
+### 9.1 フェーズ進捗
+
+| フェーズ | 状態 | 補足 |
+|---|---|---|
+| 0 環境構築 | ✅ 完了 | Next.js 16 + TS + Tailwind v4 + next-themes + PWA manifest |
+| 1 NOTE (CRUD) | ✅ 完了 + 拡張 | 下記 9.2 の追加機能まで実装済み |
+| 2 ユーザー登録・PFC算出 | ⬜ 未着手 | 次の候補 |
+| 3 SHOKUJI (GPT-4o) | 🟡 ルート雛形のみ | `app/api/analyze-meal/route.ts` は雛形。画面は未実装（ナビは ComingSoon） |
+| 4 PWA仕上げ・README | ⬜ 一部のみ | manifest 済 |
+
+### 9.2 NOTE 画面の追加実装（仕様 §3.2 を超える部分）
+
+- **スーパーセット（種目グループ化）**
+  - 作成は **「種目を追加」シート内**で行う: シート上部の「スーパーセットを組む」をON → テンプレ種目を複数タップ（選択順を番号表示）→「N種目でスーパーセット作成」で当日ログへ一括追加しグループ化。
+  - 表示: 同一 `groupId` のカードを「SUPERSET A/B…」枠で束ね、枠下に **「まとめてセット完了」**（全種目を現在値で1ラウンド記録）と **「解除」** を表示。
+  - 種目削除でメンバーが1つになったグループは自動解散。
+- **ドロップセット（重量先・レップ後）**
+  - 「重量で段追加」で現在の重量を段として積む（例 80→60→40）。DROPプレビューの各段の `×レップ` を**タップして後から入力**できる（`EditableReps`）。
+  - 保存形: 先頭=トップセット、`drops[]`=2段目以降。表示は `⤵` で連結。
+- **完了セットの編集**: 横並びセットのチップを**タップすると `SetEditor`（編集パネル）**が開く。各段の重量・レップ・自重を修正、ドロップ段の追加/削除も可。保存で `repo.updateSet`。
+- **Tactical Counter の誤作動修正**: +/- は押下即時ではなく**指を離した時**に1ステップ。移動しきい値超え/`pointercancel`（スクロール開始）は反応しない（`useHold` + `touchAction: pan-y`）。
+- **追加後スクロール**: 種目を追加すると**その新しいカードへスクロール**（`cardRefs` + `pendingScroll`）。
+- **モーダルのスクロール対策**: シート/編集パネルは `FramePortal` で端末枠 `#fn-frame` 直下へ portal。ページのスクロール位置に依存せず常にビューポートを覆う（以前は一番下スクロール状態で開く不具合があった）。
+
+### 9.3 データモデルの追加点
+
+- `WorkoutLog.groupId: string | null`（スーパーセット）。
+- `NoteRepo` に `createGroup(logIds)` / `ungroup(groupId)` / `updateSet(logId,setId,set)` を追加。local / supabase 両実装済み。
+- マイグレーション `supabase/migrations/0002_superset.sql`（`workout_logs.group_id` 追加）。
+
+### 9.4 主要ファイル
+
+- 画面: `components/screens/note/NoteScreen.tsx`（状態の中枢）
+- 種目カード: `ExerciseCard.tsx` / カウンター: `Counter.tsx` + `useHold.ts`
+- シート類: `AddExerciseSheet.tsx`（種目追加＋スーパーセット作成）/ `SetEditor.tsx`（完了セット編集）/ `FramePortal.tsx`
+- データ層: `lib/db/`（`types.ts` 契約 / `local-repo.ts` / `supabase-repo.ts` / `index.ts` でフォールバック切替）
+
+### 9.5 既知の注意点
+
+- Supabase env 未設定時は **localStorage 永続化**で動作（キー `fitnote.note.v1`）。Vercel プレビューもこのモード。
+- `eslint` は React 19 の厳格ルールで既存ファイル含め数件 error（`set-state-in-effect` / refs）。**`next build` は eslint を通さず通過**するためデプロイは可能。気になるなら別途整理。
+- スーパーセット作成は当日ログへ追加するフロー。既に追加済みの単独種目を後から束ねるUIは現状なし（必要なら追加検討）。
+
+### 9.6 次の一手の候補
+
+1. フェーズ2（ユーザー登録・初期PFC算出）
+2. フェーズ3（SHOKUJI 画面 + GPT-4o 連携。ルート雛形は用意済み）
+3. NOTE 仕上げ（前回実績プリセットの精度、スーパーセットの並び替え等）

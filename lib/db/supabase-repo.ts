@@ -136,6 +136,23 @@ export class SupabaseNoteRepo implements NoteRepo {
     };
   }
 
+  async updateSet(_logId: string, setId: string, set: NewSet): Promise<WorkoutSet> {
+    const { data, error } = await this.sb
+      .from("workout_sets")
+      .update({ weight: set.weight, reps: set.reps, bodyweight: set.bodyweight, drops: set.drops })
+      .eq("id", setId)
+      .select("id,weight,reps,bodyweight,drops")
+      .single();
+    if (error) throw error;
+    return {
+      id: data.id as string,
+      weight: Number(data.weight),
+      reps: data.reps as number,
+      bodyweight: data.bodyweight as boolean,
+      drops: ((data.drops ?? []) as SetStage[]).map((d) => ({ weight: Number(d.weight), reps: d.reps })),
+    };
+  }
+
   async removeSet(_logId: string, setId: string): Promise<void> {
     const { error } = await this.sb.from("workout_sets").delete().eq("id", setId);
     if (error) throw error;
