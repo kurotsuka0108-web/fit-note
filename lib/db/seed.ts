@@ -22,10 +22,10 @@ export const SEC_EXERCISES = new Set<string>(["プランク"]);
 // 種目名から既定の記録単位を返す。
 export const defaultUnit = (name: string): Unit => (SEC_EXERCISES.has(name) ? "sec" : "reps");
 
-// 単位付きのシードライブラリ。
+// 単位・既定インターバル付きのシードライブラリ。
 export const EXERCISE_LIBRARY_SEED: Library = Object.fromEntries(
   Object.entries(SEED_NAMES).map(([part, names]) => [
     part,
-    names.map((name) => ({ name, unit: defaultUnit(name) })),
+    names.map((name) => ({ name, unit: defaultUnit(name), intervalSec: DEFAULT_INTERVAL_SEC })),
   ]),
 );

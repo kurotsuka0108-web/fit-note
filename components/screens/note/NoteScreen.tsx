@@ -6,6 +6,7 @@ import { useC } from "@/lib/use-tokens";
 import { ON_GOLD } from "@/lib/theme";
 import { currentWeek, todayYmd } from "@/lib/date";
 import {
+  DEFAULT_INTERVAL_SEC,
   getNoteRepo,
   type LastSession,
   type Library,
@@ -18,6 +19,7 @@ import { ExerciseCard } from "./ExerciseCard";
 import { AddExerciseSheet } from "./AddExerciseSheet";
 import { SetEditor } from "./SetEditor";
 import { TimerOverlay } from "./TimerOverlay";
+import { IntervalEditor } from "./IntervalEditor";
 
 type TimerState = {
   key: number;
@@ -217,22 +219,46 @@ export function NoteScreen() {
     });
   };
 
+  // インターバル変更: その日のログを更新し、種目の既定としても記憶（次回同じ種目で復元）。
   const changeInterval = async (id: string, sec: number) => {
-    setLogs((ls) => ls.map((l) => (l.id === id ? { ...l, intervalSec: Math.max(0, sec) } : l)));
+    const log = logs.find((l) => l.id === id);
+    const v = Math.max(0, sec);
+    setLogs((ls) => ls.map((l) => (l.id === id ? { ...l, intervalSec: v } : l)));
     try {
-      await repo.setLogInterval(id, sec);
+      await repo.setLogInterval(id, v);
+      if (log) await repo.setExerciseInterval(log.name, v);
+      setLibrary(await repo.getLibrary()); // 記憶した既定を反映（同セッションの再追加でも復元）
     } catch (e) {
       fail(e);
     }
   };
 
-  // スーパーセットのまとめて記録: グループ内の全種目を現在の入力値で1セットずつ記録（1ラウンド）。
-  const completeGroup = async (groupId: string) => {
+  // スーパーセットの休憩はグループ全員へ反映（各種目の既定としても記憶）。
+  const changeGroupInterval = async (groupId: string, sec: number) => {
+    const members = logs.filter((l) => l.groupId === groupId);
+    const v = Math.max(0, sec);
+    setLogs((ls) => ls.map((l) => (l.groupId === groupId ? { ...l, intervalSec: v } : l)));
     try {
-      for (const m of logs.filter((l) => l.groupId === groupId)) await recordSet(m.id);
+      for (const m of members) {
+        await repo.setLogInterval(m.id, v);
+        await repo.setExerciseInterval(m.name, v);
+      }
+      setLibrary(await repo.getLibrary());
     } catch (e) {
       fail(e);
     }
+  };
+
+  // スーパーセットのまとめて記録: グループ内の全種目を現在の入力値で1セットずつ記録（1ラウンド）→ 休憩。
+  const completeGroup = async (groupId: string) => {
+    const members = logs.filter((l) => l.groupId === groupId);
+    try {
+      for (const m of members) await recordSet(m.id);
+    } catch (e) {
+      fail(e);
+      return;
+    }
+    if (members[0]) startRest(members[0]); // グループ代表のインターバルで休憩
   };
 
   const removeSet = async (id: string, setId: string) => {
@@ -302,12 +328,12 @@ export function NoteScreen() {
 
   /* ── スーパーセット（種目のグループ化） ── */
   // 「種目を追加」シートで選んだ複数種目を当日ログへ追加し、1つのスーパーセットにまとめる。
-  const addSuperset = async (items: { name: string; part: string; unit: Unit }[]) => {
+  const addSuperset = async (items: { name: string; part: string; unit: Unit; intervalSec: number }[]) => {
     setAdding(false);
     if (items.length < 2) return;
     try {
       const created: WorkoutLog[] = [];
-      for (const it of items) created.push(await repo.addLog(active, it.name, it.part, it.unit));
+      for (const it of items) created.push(await repo.addLog(active, it.name, it.part, it.unit, it.intervalSec));
       const ids = created.map((l) => l.id);
       const groupId = await repo.createGroup(ids);
       const withGroup = created.map((l) => ({ ...l, groupId }));
@@ -336,10 +362,10 @@ export function NoteScreen() {
     }
   };
 
-  const addToday = async (name: string, part: string, unit: Unit) => {
+  const addToday = async (name: string, part: string, unit: Unit, intervalSec: number) => {
     setAdding(false);
     try {
-      const log = await repo.addLog(active, name, part, unit);
+      const log = await repo.addLog(active, name, part, unit, intervalSec);
       const last = await repo.getLastSession(active, name);
       setLogs((ls) => [...ls, log]);
       setDrafts((p) => ({ ...p, [log.id]: newDraftFor(unit) }));
@@ -357,7 +383,7 @@ export function NoteScreen() {
     } catch (e) {
       fail(e);
     }
-    await addToday(name, part, unit);
+    await addToday(name, part, unit, DEFAULT_INTERVAL_SEC);
   };
 
   const todayNames = logs.map((l) => l.name);
@@ -367,7 +393,7 @@ export function NoteScreen() {
   const renderCard = (l: WorkoutLog, num: number) => (
     <div key={l.id} ref={(el) => { cardRefs.current[l.id] = el; }} style={{ scrollMarginTop: 12 }}>
       <ExerciseCard
-        index={num} log={l} unit={l.unit} intervalSec={l.intervalSec}
+        index={num} log={l} unit={l.unit} intervalSec={l.intervalSec} grouped={!!l.groupId}
         draftWeight={drafts[l.id]?.weight ?? NEW_DRAFT.weight}
         draftReps={drafts[l.id]?.reps ?? NEW_DRAFT.reps}
         bodyweight={drafts[l.id]?.bodyweight ?? false}
@@ -439,9 +465,12 @@ export function NoteScreen() {
               <div className="space-y-2">
                 {b.items.map((it) => renderCard(it.log, it.num))}
               </div>
-              {/* スーパーセットを1ラウンド = 全種目を現在値でまとめて記録 */}
+              {/* グループ共通の休憩設定 + 1ラウンドまとめて記録 → 休憩タイマー */}
+              <div className="px-1 pt-2">
+                <IntervalEditor value={b.items[0]?.log.intervalSec ?? 60} onSet={(sec) => changeGroupInterval(b.groupId, sec)} />
+              </div>
               <button onClick={() => completeGroup(b.groupId)}
-                className="w-full rounded-xl flex items-center justify-center gap-2 mt-2"
+                className="w-full rounded-xl flex items-center justify-center gap-2 mt-1"
                 style={{ minHeight: 52, background: C.accent, color: ON_GOLD, fontWeight: 800, fontSize: 15 }}>
                 <Check size={18} /> まとめてセット完了（{b.items.length}種目）
               </button>

@@ -3,8 +3,8 @@
 // 記録単位: reps=回数 / sec=秒数（プランク等の時間種目）。
 export type Unit = "reps" | "sec";
 
-// 種目ライブラリの1エントリ（名前 + 記録単位）。
-export type ExerciseDef = { name: string; unit: Unit };
+// 種目ライブラリの1エントリ（名前 + 記録単位 + 既定インターバル秒）。
+export type ExerciseDef = { name: string; unit: Unit; intervalSec: number };
 
 export type Library = Record<string, ExerciseDef[]>; // { 部位: [{name, unit}, ...] }
 
@@ -51,11 +51,13 @@ export interface NoteRepo {
   /** 指定日の種目ログ（セット込み）を order 昇順で返す */
   getLogs(date: string): Promise<WorkoutLog[]>;
   /** 当日ログに種目を追加して、作成したログを返す */
-  addLog(date: string, name: string, part: string, unit: Unit): Promise<WorkoutLog>;
+  addLog(date: string, name: string, part: string, unit: Unit, intervalSec: number): Promise<WorkoutLog>;
   /** 種目ログを削除（セットも連動削除） */
   removeLog(logId: string): Promise<void>;
   /** セット間インターバル（休憩秒）を更新 */
   setLogInterval(logId: string, intervalSec: number): Promise<void>;
+  /** 種目ごとの既定インターバルを記憶（次回同じ種目を追加したとき復元される） */
+  setExerciseInterval(name: string, intervalSec: number): Promise<void>;
 
   /** 指定ログ群を1つのスーパーセットにまとめ、割り当てた groupId を返す */
   createGroup(logIds: string[]): Promise<string>;

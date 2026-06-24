@@ -41,7 +41,7 @@ export class SupabaseNoteRepo implements NoteRepo {
   async getLibrary(): Promise<Library> {
     const { data, error } = await this.sb
       .from("exercises")
-      .select("body_part,name,unit,created_at")
+      .select("body_part,name,unit,interval_sec,created_at")
       .or(`user_id.is.null,user_id.eq.${DEMO_USER_ID}`)
       .order("created_at", { ascending: true });
     if (error) throw error;
@@ -50,7 +50,7 @@ export class SupabaseNoteRepo implements NoteRepo {
     for (const part of BODY_PARTS) lib[part] = [];
     for (const row of data ?? []) {
       const part = row.body_part as string;
-      (lib[part] ??= []).push({ name: row.name as string, unit: ((row.unit as Unit) ?? "reps") });
+      (lib[part] ??= []).push({ name: row.name as string, unit: ((row.unit as Unit) ?? "reps"), intervalSec: (row.interval_sec as number) ?? 60 });
     }
     return lib;
   }
@@ -61,6 +61,16 @@ export class SupabaseNoteRepo implements NoteRepo {
       .insert({ user_id: DEMO_USER_ID, body_part: part, name, unit, is_custom: true });
     // 23505 = unique 制約違反（重複）。重複は無視する。
     if (error && error.code !== "23505") throw error;
+  }
+
+  async setExerciseInterval(name: string, intervalSec: number): Promise<void> {
+    // ユーザー所有の同名種目の既定インターバルを更新（共通テンプレは RLS で更新不可のため対象外）。
+    const { error } = await this.sb
+      .from("exercises")
+      .update({ interval_sec: Math.max(0, Math.round(intervalSec)) })
+      .eq("user_id", DEMO_USER_ID)
+      .eq("name", name);
+    if (error) throw error;
   }
 
   async getLogs(date: string): Promise<WorkoutLog[]> {
@@ -74,7 +84,7 @@ export class SupabaseNoteRepo implements NoteRepo {
     return ((data ?? []) as unknown as LogRow[]).map(toLog);
   }
 
-  async addLog(date: string, name: string, part: string, unit: Unit): Promise<WorkoutLog> {
+  async addLog(date: string, name: string, part: string, unit: Unit, intervalSec: number): Promise<WorkoutLog> {
     const { count } = await this.sb
       .from("workout_logs")
       .select("id", { count: "exact", head: true })
@@ -83,7 +93,7 @@ export class SupabaseNoteRepo implements NoteRepo {
 
     const { data, error } = await this.sb
       .from("workout_logs")
-      .insert({ user_id: DEMO_USER_ID, date, name, body_part: part, order: count ?? 0, unit })
+      .insert({ user_id: DEMO_USER_ID, date, name, body_part: part, order: count ?? 0, unit, interval_sec: Math.max(0, Math.round(intervalSec)) })
       .select(LOG_SELECT)
       .single();
     if (error) throw error;

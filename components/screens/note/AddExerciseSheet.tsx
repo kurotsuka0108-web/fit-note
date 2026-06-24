@@ -7,7 +7,7 @@ import { ON_GOLD } from "@/lib/theme";
 import { BODY_PARTS, type Library, type Unit } from "@/lib/db";
 import { FramePortal } from "./FramePortal";
 
-type Picked = { name: string; part: string; unit: Unit };
+type Picked = { name: string; part: string; unit: Unit; intervalSec: number };
 
 /* 種目追加シート（仕様 §3.2）。部位別テンプレ閲覧 / オリジナル種目追加の2モード。
    さらに「スーパーセットを組む」をONにすると、テンプレから複数種目を選んで一括グループ追加できる。
@@ -17,7 +17,7 @@ export function AddExerciseSheet({
 }: {
   library: Library;
   todayNames: string[];
-  onPick: (name: string, part: string, unit: Unit) => void;
+  onPick: (name: string, part: string, unit: Unit, intervalSec: number) => void;
   onAddCustom: (part: string, name: string, unit: Unit) => void;
   onAddSuperset: (items: Picked[]) => void;
   onClose: () => void;
@@ -37,10 +37,10 @@ export function AddExerciseSheet({
 
   // スーパーセット選択
   const pickedIndex = (ex: string, p: string) => picked.findIndex((x) => x.name === ex && x.part === p);
-  const togglePick = (ex: string, p: string, u: Unit) =>
+  const togglePick = (ex: string, p: string, u: Unit, iv: number) =>
     setPicked((arr) => {
       const i = arr.findIndex((x) => x.name === ex && x.part === p);
-      return i >= 0 ? arr.filter((_, j) => j !== i) : [...arr, { name: ex, part: p, unit: u }];
+      return i >= 0 ? arr.filter((_, j) => j !== i) : [...arr, { name: ex, part: p, unit: u, intervalSec: iv }];
     });
   const exitSuper = () => { setSuperMode(false); setPicked([]); };
   const confirmSuper = () => { if (picked.length >= 2) onAddSuperset(picked); };
@@ -101,7 +101,7 @@ export function AddExerciseSheet({
                         const idx = pickedIndex(ex.name, bp);
                         const on = idx >= 0;
                         return (
-                          <button key={ex.name} onClick={() => togglePick(ex.name, bp, ex.unit)}
+                          <button key={ex.name} onClick={() => togglePick(ex.name, bp, ex.unit, ex.intervalSec)}
                             className="rounded-full px-3 flex items-center gap-1"
                             style={{ minHeight: 40, background: on ? C.accent : C.tactical, color: on ? ON_GOLD : C.hi, fontSize: 13, fontWeight: on ? 800 : 600, border: `1px solid ${on ? C.accent : C.border}` }}>
                             {on && <span style={{ fontWeight: 800 }}>{idx + 1}.</span>}{ex.name}{ex.unit === "sec" && secBadge}
@@ -110,7 +110,7 @@ export function AddExerciseSheet({
                       }
                       const added = todayNames.includes(ex.name);
                       return (
-                        <button key={ex.name} onClick={() => onPick(ex.name, bp, ex.unit)}
+                        <button key={ex.name} onClick={() => onPick(ex.name, bp, ex.unit, ex.intervalSec)}
                           className="rounded-full px-3 flex items-center gap-1"
                           style={{ minHeight: 40, background: C.tactical, color: C.hi, fontSize: 13, fontWeight: 600, border: `1px solid ${added ? C.accent : C.border}` }}>
                           {added && <Check size={13} color={C.accent} />}{ex.name}{ex.unit === "sec" && secBadge}

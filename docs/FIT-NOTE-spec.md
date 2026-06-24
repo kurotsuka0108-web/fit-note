@@ -222,18 +222,19 @@ const EXERCISE_LIBRARY_SEED = {
   - 種目チップには `秒`（Timer アイコン）バッジを表示。
 - **タイマー（`TimerOverlay`、全画面カウントダウン）**
   - **実施タイマー（work）**: 秒数種目はカードのボタンが「**スタート**」に変化。押すと設定秒数のカウントダウン → 完了で**実施秒数を記録** → 休憩へ。スキップ時は経過秒数を記録。
-  - **インターバル（rest）**: セット記録後に休憩タイマーを表示（回数種目は「完了」後、秒数種目は実施後）。`WorkoutLog.intervalSec`（既定60、0=無し）で**種目ごとに編集可**（カードの「休憩 −/＋/数字タップ」）。
+  - **インターバル（rest）**: セット記録後に休憩タイマーを表示（回数種目は「完了」後、秒数種目は実施後、スーパーセットは「まとめてセット完了」後）。`WorkoutLog.intervalSec`（既定60、0=無し）で**種目ごとに編集可**（カード/グループ枠の「休憩 −/＋/数字タップ」）。
+  - **インターバルは種目ごとに記憶**: 変更すると `repo.setExerciseInterval(name)` で既定として保存され、次回同じ種目を追加したとき復元される（local は `intervalByName`、supabase は `exercises.interval_sec`／共通テンプレは RLS で更新不可）。`ExerciseDef.intervalSec` がライブラリ経由で `addLog` に渡る。
   - タイマー画面は ±10秒・一時停止/再開・スキップ・やめる、完了時に振動（`navigator.vibrate`）。
-  - 注: スーパーセットの「まとめてセット完了」はタイマーを挟まず即記録（バッチ用途）。
+- **スーパーセットの一括操作**: グループ内のカードは**個別の完了/スタート・ドロップ・休憩UIを出さない**。グループ枠に**1つの「まとめてセット完了」**＋**共通の休憩設定**を表示し、完了で全種目を記録→休憩タイマー。休憩変更はグループ全員の既定に反映。
 - **モーダルのスクロール対策**: シート/編集パネルは `FramePortal` で端末枠 `#fn-frame` 直下へ portal。ページのスクロール位置に依存せず常にビューポートを覆う（以前は一番下スクロール状態で開く不具合があった）。
 
 ### 9.3 データモデルの追加点
 
 - `WorkoutLog.groupId: string | null`（スーパーセット）/ `WorkoutLog.unit: "reps"|"sec"`（記録単位）/ `WorkoutLog.intervalSec: number`（休憩秒、既定60）。
-- `Library` は `Record<部位, { name, unit }[]>`（種目ごとに単位を保持）。`ExerciseDef` 型。
-- `NoteRepo` に `createGroup` / `ungroup` / `updateSet` / `setLogInterval` を追加。`addLog`/`addCustomExercise` は `unit` 引数を取る。local / supabase 両実装済み。
-- マイグレーション: `0002_superset.sql`（`group_id`）/ `0003_unit.sql`（`exercises.unit`・`workout_logs.unit`、プランクを sec に）/ `0004_interval.sql`（`workout_logs.interval_sec`）。
-- localStorage 旧データ互換: `custom`(旧 string[]) と `unit`/`intervalSec` 未設定ログを読み込み時に正規化。
+- `Library` は `Record<部位, { name, unit, intervalSec }[]>`（種目ごとに単位・既定休憩を保持）。`ExerciseDef` 型。
+- `NoteRepo` に `createGroup` / `ungroup` / `updateSet` / `setLogInterval` / `setExerciseInterval` を追加。`addLog` は `unit, intervalSec`、`addCustomExercise` は `unit` を取る。local / supabase 両実装済み。
+- マイグレーション: `0002_superset.sql`（`group_id`）/ `0003_unit.sql`（`exercises.unit`・`workout_logs.unit`、プランクを sec に）/ `0004_interval.sql`（`workout_logs.interval_sec`）/ `0005_exercise_interval.sql`（`exercises.interval_sec`）。
+- localStorage 旧データ互換: `custom`(旧 string[]) と `unit`/`intervalSec` 未設定ログを読み込み時に正規化。種目別休憩は `intervalByName` に保存。
 
 ### 9.4 主要ファイル
 
