@@ -101,6 +101,10 @@ export function NoteScreen() {
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const pendingScroll = useRef<string | null>(null);
   const scrollToCard = (id: string) => { pendingScroll.current = id; };
+  // 即時スクロール（タイマー終了後など logs 更新を伴わない場面用）
+  const scrollToCardNow = (id: string) => {
+    requestAnimationFrame(() => cardRefs.current[id]?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
   useEffect(() => {
     const id = pendingScroll.current;
     if (!id) return;
@@ -179,11 +183,12 @@ export function NoteScreen() {
     setTimer({ ...t, key: ++timerSeq.current });
 
   // セット記録後のインターバル（休憩）タイマー。intervalSec<=0 なら出さない。
-  const startRest = (log: WorkoutLog) => {
-    if (log.intervalSec <= 0) { setTimer(null); return; }
+  // afterDone は完了時（自然完了/スキップ）に呼ぶ追加処理（例: スーパーセット先頭へ戻る）。
+  const startRest = (log: WorkoutLog, afterDone?: () => void) => {
+    if (log.intervalSec <= 0) { setTimer(null); afterDone?.(); return; }
     openTimer({
       seconds: log.intervalSec, title: "インターバル", subtitle: "休憩", kind: "rest",
-      onDone: () => setTimer(null), onCancel: () => setTimer(null),
+      onDone: () => { setTimer(null); afterDone?.(); }, onCancel: () => setTimer(null),
     });
   };
 
@@ -258,7 +263,8 @@ export function NoteScreen() {
       fail(e);
       return;
     }
-    if (members[0]) startRest(members[0]); // グループ代表のインターバルで休憩
+    // グループ代表のインターバルで休憩 → 終了後はスーパーセット1種目目へ戻る
+    if (members[0]) startRest(members[0], () => scrollToCardNow(members[0].id));
   };
 
   const removeSet = async (id: string, setId: string) => {
