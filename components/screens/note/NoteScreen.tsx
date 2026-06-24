@@ -92,6 +92,8 @@ export function NoteScreen() {
   const [editor, setEditor] = useState<
     { logId: string; setId: string | null; title: string; unit: Unit; bodyweight: boolean; stages: { weight: number; reps: number }[] } | null
   >(null);
+  // 直近に組んだドロップ構成を種目ごとに記憶（次セットの初期値として復元し再入力を省く）
+  const [lastDrop, setLastDrop] = useState<Record<string, { bodyweight: boolean; stages: { weight: number; reps: number }[] }>>({});
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [timer, setTimer] = useState<TimerState | null>(null);
@@ -163,8 +165,12 @@ export function NoteScreen() {
     setDrafts((p) => ({ ...p, [id]: { ...p[id], reps: Math.max(0, p[id].reps + dir * (unit === "sec" ? 5 : 1)) } }));
   const setR = (id: string, v: number) =>
     setDrafts((p) => ({ ...p, [id]: { ...p[id], reps: Math.max(0, Math.round(v)) } }));
+  // 自重をONにしたら重量は0kgスタート（純粋な自重）。OFFは重量を据え置き。
   const toggleBW = (id: string) =>
-    setDrafts((p) => ({ ...p, [id]: { ...p[id], bodyweight: !p[id].bodyweight } }));
+    setDrafts((p) => {
+      const bw = !p[id].bodyweight;
+      return { ...p, [id]: { ...p[id], bodyweight: bw, weight: bw ? 0 : p[id].weight } };
+    });
   const presetLast = (id: string) => {
     const l = lasts[id];
     if (l) setDrafts((p) => ({ ...p, [id]: { weight: l.w, reps: l.r, bodyweight: l.bw } }));
@@ -283,12 +289,15 @@ export function NoteScreen() {
       stages: [{ weight: set.weight, reps: set.reps }, ...set.drops.map((d) => ({ weight: d.weight, reps: d.reps }))],
     });
 
-  // 「ドロップ」ボタン → 新規ドロップセットを SetEditor で組む（現在の入力値をトップ段に）
+  // 「ドロップ」ボタン → 新規ドロップセットを SetEditor で組む。
+  // 直近のドロップ構成があればそれを初期値に（2セット目以降を1から組み直さない）。
   const openDropEditor = (logId: string, unit: Unit) => {
+    const tmpl = lastDrop[logId];
     const d = drafts[logId] ?? newDraftFor(unit);
     setEditor({
-      logId, setId: null, title: "ドロップセットを記録", unit, bodyweight: d.bodyweight,
-      stages: [{ weight: d.weight, reps: d.reps }, { weight: d.weight, reps: 0 }],
+      logId, setId: null, title: "ドロップセットを記録", unit,
+      bodyweight: tmpl ? tmpl.bodyweight : d.bodyweight,
+      stages: tmpl ? tmpl.stages.map((s) => ({ ...s })) : [{ weight: d.weight, reps: d.reps }, { weight: d.weight, reps: 0 }],
     });
   };
 
@@ -305,6 +314,13 @@ export function NoteScreen() {
         const created = await repo.addSet(logId, patch);
         setLogs((ls) => ls.map((l) => (l.id === logId ? { ...l, sets: [...l.sets, created] } : l)));
         setDrafts((p) => ({ ...p, [logId]: { weight: patch.weight, reps: patch.reps, bodyweight: patch.bodyweight } }));
+      }
+      // ドロップ構成（2段以上）は次セットの初期値として記憶
+      if (patch.drops.length > 0) {
+        setLastDrop((p) => ({
+          ...p,
+          [logId]: { bodyweight: patch.bodyweight, stages: [{ weight: patch.weight, reps: patch.reps }, ...patch.drops.map((d) => ({ ...d }))] },
+        }));
       }
     } catch (e) {
       fail(e);
@@ -327,6 +343,7 @@ export function NoteScreen() {
       setLogs(next);
       setDrafts((p) => { const n = { ...p }; delete n[id]; return n; });
       setLasts((p) => { const n = { ...p }; delete n[id]; return n; });
+      setLastDrop((p) => { const n = { ...p }; delete n[id]; return n; });
     } catch (e) {
       fail(e);
     }

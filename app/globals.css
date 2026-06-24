@@ -63,6 +63,13 @@ body {
   scrollbar-width: none;
 }
 
+/* 全ボタン共通: 長押しでの選択/コールアウト（iOSの「コピー/調べる」等）を抑止 */
+button {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 /* フォーカスリング（アクセシビリティ） */
 button:focus-visible,
 input:focus-visible {
