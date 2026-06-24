@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Check, Plus, Trash2, X } from "lucide-react";
 import { useC } from "@/lib/use-tokens";
 import { ON_GOLD } from "@/lib/theme";
-import type { NewSet, WorkoutSet } from "@/lib/db";
+import type { NewSet } from "@/lib/db";
 import { Counter } from "./Counter";
 import { FramePortal } from "./FramePortal";
 
@@ -12,22 +12,22 @@ type Stage = { weight: number; reps: number };
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
-/* 完了セットの編集パネル（仕様: チップタップで開く）。
-   トップセット + 各ドロップ段の重量・レップを編集し、段の追加/削除もできる。 */
+/* セットの編集／作成パネル。
+   - 完了セットのチップタップ → 編集（既存セットを上書き）
+   - 「ドロップ」ボタン → 新規ドロップセットの作成
+   トップセット + 各ドロップ段の重量・レップ・自重を編集し、段の追加/削除もできる。 */
 export function SetEditor({
-  set, index, onSave, onClose,
+  title, initialBodyweight, initialStages, onSave, onClose,
 }: {
-  set: WorkoutSet;
-  index: number; // 表示用のセット番号
+  title: string;
+  initialBodyweight: boolean;
+  initialStages: Stage[];
   onSave: (patch: NewSet) => void;
   onClose: () => void;
 }) {
   const C = useC();
-  const [bodyweight, setBodyweight] = useState(set.bodyweight);
-  const [stages, setStages] = useState<Stage[]>([
-    { weight: set.weight, reps: set.reps },
-    ...set.drops.map((d) => ({ weight: d.weight, reps: d.reps })),
-  ]);
+  const [bodyweight, setBodyweight] = useState(initialBodyweight);
+  const [stages, setStages] = useState<Stage[]>(initialStages);
 
   const patch = (i: number, p: Partial<Stage>) =>
     setStages((arr) => arr.map((s, j) => (j === i ? { ...s, ...p } : s)));
@@ -52,7 +52,7 @@ export function SetEditor({
           style={{ background: C.bg, border: `1px solid ${C.border}`, maxHeight: "92%" }}
           onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center justify-between px-5 pt-5 pb-3" style={{ flexShrink: 0 }}>
-            <h3 style={{ color: C.hi, fontSize: 16, fontWeight: 800 }}>SET {index} を編集</h3>
+            <h3 style={{ color: C.hi, fontSize: 16, fontWeight: 800 }}>{title}</h3>
             <button onClick={onClose} style={{ color: C.mid }}><X size={20} /></button>
           </div>
 

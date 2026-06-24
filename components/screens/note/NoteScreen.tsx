@@ -10,7 +10,6 @@ import {
   type LastSession,
   type Library,
   type NewSet,
-  type SetStage,
   type WorkoutLog,
   type WorkoutSet,
 } from "@/lib/db";
@@ -47,17 +46,17 @@ function toBlocks(logs: WorkoutLog[]): Block[] {
   return blocks;
 }
 
-// drops = 確定前のドロップ段（トップセット側）。完了時に現在値が最終段として連結される。
-type Draft = { weight: number; reps: number; bodyweight: boolean; drops: SetStage[] };
+// 記録中の単発入力値。ドロップ（多段）は SetEditor で組むのでここには持たない。
+type Draft = { weight: number; reps: number; bodyweight: boolean };
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
-const NEW_DRAFT: Draft = { weight: 20, reps: 10, bodyweight: false, drops: [] };
+const NEW_DRAFT: Draft = { weight: 20, reps: 10, bodyweight: false };
 
 // ログの初期ドラフト（記録中の重量・レップ・自重フラグ）。最新セットがあればそれを引き継ぐ。
 function draftFor(log: WorkoutLog): Draft {
   const last = log.sets[log.sets.length - 1];
   return last
-    ? { weight: last.weight, reps: last.reps, bodyweight: last.bodyweight, drops: [] }
+    ? { weight: last.weight, reps: last.reps, bodyweight: last.bodyweight }
     : { ...NEW_DRAFT };
 }
 
@@ -72,7 +71,10 @@ export function NoteScreen() {
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [lasts, setLasts] = useState<Record<string, LastSession>>({});
   const [adding, setAdding] = useState(false);
-  const [editing, setEditing] = useState<{ logId: string; set: WorkoutSet; index: number } | null>(null);
+  // セット編集／ドロップ新規作成パネルの対象。setId=null は新規ドロップセット作成。
+  const [editor, setEditor] = useState<
+    { logId: string; setId: string | null; title: string; bodyweight: boolean; stages: { weight: number; reps: number }[] } | null
+  >(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
@@ -139,34 +141,18 @@ export function NoteScreen() {
     setDrafts((p) => ({ ...p, [id]: { ...p[id], reps: Math.max(0, Math.round(v)) } }));
   const toggleBW = (id: string) =>
     setDrafts((p) => ({ ...p, [id]: { ...p[id], bodyweight: !p[id].bodyweight } }));
-  // 現在の重量・レップを1段として確定し、次の（より軽い）段の入力に移る
-  const addDrop = (id: string) =>
-    setDrafts((p) => ({ ...p, [id]: { ...p[id], drops: [...p[id].drops, { weight: p[id].weight, reps: p[id].reps }] } }));
-  const clearDrops = (id: string) =>
-    setDrafts((p) => ({ ...p, [id]: { ...p[id], drops: [] } }));
-  // ドロップ段のレップを後から入力（#2: 重量先・レップ後）
-  const setDropReps = (id: string, index: number, reps: number) =>
-    setDrafts((p) => ({
-      ...p,
-      [id]: { ...p[id], drops: p[id].drops.map((d, i) => (i === index ? { ...d, reps: Math.max(0, Math.round(reps)) } : d)) },
-    }));
   const presetLast = (id: string) => {
     const l = lasts[id];
-    if (l) setDrafts((p) => ({ ...p, [id]: { weight: l.w, reps: l.r, bodyweight: l.bw, drops: [] } }));
+    if (l) setDrafts((p) => ({ ...p, [id]: { weight: l.w, reps: l.r, bodyweight: l.bw } }));
   };
 
   /* ── 永続化操作 ── */
-  // 1種目分のセット記録（ドロップ連鎖を連結して保存し、ローカル状態を更新）。
+  // 1種目分の単発セットを記録（重量・レップ・自重は次セットへ継続）。ドロップは SetEditor 経由。
   const recordSet = async (id: string) => {
     const d = drafts[id];
     if (!d) return;
-    // 連鎖 = これまでのドロップ段 + 現在入力中の値（最終段）。先頭がトップセット。
-    const stages = [...d.drops, { weight: d.weight, reps: d.reps }];
-    const [top, ...rest] = stages;
-    const set = await repo.addSet(id, { weight: top.weight, reps: top.reps, bodyweight: d.bodyweight, drops: rest });
+    const set = await repo.addSet(id, { weight: d.weight, reps: d.reps, bodyweight: d.bodyweight, drops: [] });
     setLogs((ls) => ls.map((l) => (l.id === id ? { ...l, sets: [...l.sets, set] } : l)));
-    // 連鎖はリセット（重量・レップ・自重は次セットへ継続）
-    setDrafts((p) => ({ ...p, [id]: { ...p[id], drops: [] } }));
   };
 
   const completeSet = async (id: string) => {
@@ -195,14 +181,36 @@ export function NoteScreen() {
     }
   };
 
-  // 完了セットの編集を保存（#1）
-  const saveSetEdit = async (patch: NewSet) => {
-    if (!editing) return;
-    const { logId, set } = editing;
-    setEditing(null);
+  // 完了セットのチップタップ → 編集
+  const openEditSet = (logId: string, set: WorkoutSet, index: number) =>
+    setEditor({
+      logId, setId: set.id, title: `SET ${index} を編集`, bodyweight: set.bodyweight,
+      stages: [{ weight: set.weight, reps: set.reps }, ...set.drops.map((d) => ({ weight: d.weight, reps: d.reps }))],
+    });
+
+  // 「ドロップ」ボタン → 新規ドロップセットを SetEditor で組む（現在の入力値をトップ段に）
+  const openDropEditor = (logId: string) => {
+    const d = drafts[logId] ?? NEW_DRAFT;
+    setEditor({
+      logId, setId: null, title: "ドロップセットを記録", bodyweight: d.bodyweight,
+      stages: [{ weight: d.weight, reps: d.reps }, { weight: d.weight, reps: 0 }],
+    });
+  };
+
+  // 編集パネルの保存（#1 既存編集 / ドロップ新規作成 を兼ねる）
+  const saveEditor = async (patch: NewSet) => {
+    if (!editor) return;
+    const { logId, setId } = editor;
+    setEditor(null);
     try {
-      const updated = await repo.updateSet(logId, set.id, patch);
-      setLogs((ls) => ls.map((l) => (l.id === logId ? { ...l, sets: l.sets.map((s) => (s.id === set.id ? updated : s)) } : l)));
+      if (setId) {
+        const updated = await repo.updateSet(logId, setId, patch);
+        setLogs((ls) => ls.map((l) => (l.id === logId ? { ...l, sets: l.sets.map((s) => (s.id === setId ? updated : s)) } : l)));
+      } else {
+        const created = await repo.addSet(logId, patch);
+        setLogs((ls) => ls.map((l) => (l.id === logId ? { ...l, sets: [...l.sets, created] } : l)));
+        setDrafts((p) => ({ ...p, [logId]: { weight: patch.weight, reps: patch.reps, bodyweight: patch.bodyweight } }));
+      }
     } catch (e) {
       fail(e);
     }
@@ -300,15 +308,13 @@ export function NoteScreen() {
         draftWeight={drafts[l.id]?.weight ?? NEW_DRAFT.weight}
         draftReps={drafts[l.id]?.reps ?? NEW_DRAFT.reps}
         bodyweight={drafts[l.id]?.bodyweight ?? false}
-        drops={drafts[l.id]?.drops ?? []}
         last={lasts[l.id] ?? null}
         onStepW={(d) => stepW(l.id, d)} onSetW={(v) => setW(l.id, v)}
         onStepR={(d) => stepR(l.id, d)} onSetR={(v) => setR(l.id, v)}
         onToggleBW={() => toggleBW(l.id)}
-        onAddDrop={() => addDrop(l.id)} onClearDrops={() => clearDrops(l.id)}
-        onSetDropReps={(i, v) => setDropReps(l.id, i, v)}
+        onOpenDrop={() => openDropEditor(l.id)}
         onComplete={() => completeSet(l.id)} onRemoveSet={(sid) => removeSet(l.id, sid)}
-        onEditSet={(s) => setEditing({ logId: l.id, set: s, index: l.sets.findIndex((x) => x.id === s.id) + 1 })}
+        onEditSet={(s) => openEditSet(l.id, s, l.sets.findIndex((x) => x.id === s.id) + 1)}
         onPreset={() => presetLast(l.id)} onRemove={() => removeLog(l.id)}
       />
     </div>
@@ -402,10 +408,10 @@ export function NoteScreen() {
         />
       )}
 
-      {editing && (
+      {editor && (
         <SetEditor
-          set={editing.set} index={editing.index}
-          onSave={saveSetEdit} onClose={() => setEditing(null)}
+          title={editor.title} initialBodyweight={editor.bodyweight} initialStages={editor.stages}
+          onSave={saveEditor} onClose={() => setEditor(null)}
         />
       )}
     </div>
