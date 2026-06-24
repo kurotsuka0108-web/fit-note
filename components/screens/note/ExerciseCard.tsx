@@ -4,20 +4,23 @@ import { Fragment, useEffect, useRef } from "react";
 import { Check, ChevronsDown, Pencil, Trash2, X } from "lucide-react";
 import { useC } from "@/lib/use-tokens";
 import { ON_GOLD } from "@/lib/theme";
-import type { LastSession, WorkoutLog, WorkoutSet } from "@/lib/db";
+import type { LastSession, Unit, WorkoutLog, WorkoutSet } from "@/lib/db";
 import { Counter } from "./Counter";
 
 // 重量の表示テキスト（自重 / 自重+Xkg / Xkg）
 const wText = (w: number, bw: boolean) => (bw ? (w === 0 ? "自重" : `自重+${w}kg`) : `${w}kg`);
+// レップ/秒の表示テキスト（reps→×10 / sec→10秒）
+const rText = (reps: number, unit: Unit) => (unit === "sec" ? ` ${reps}秒` : `×${reps}`);
 
 /* 種目カード（仕様 §3.2）。横並びセット・Tactical Counter・前回プリセットを内包。 */
 export function ExerciseCard({
-  index, log, draftWeight, draftReps, bodyweight, last,
+  index, log, unit, draftWeight, draftReps, bodyweight, last,
   onStepW, onSetW, onStepR, onSetR, onToggleBW, onOpenDrop,
   onComplete, onRemoveSet, onEditSet, onPreset, onRemove,
 }: {
   index: number;
   log: WorkoutLog;
+  unit: Unit;
   draftWeight: number;
   draftReps: number;
   bodyweight: boolean;
@@ -59,7 +62,7 @@ export function ExerciseCard({
       {last && (
         <>
           <p style={{ color: C.mid, fontSize: 12 }} className="mb-1">
-            前回実績: {last.bw ? (last.w === 0 ? "自重" : `自重+${last.w}kg`) : `${last.w}kg`} × {last.r}reps × {last.s}sets
+            前回実績: {last.bw ? (last.w === 0 ? "自重" : `自重+${last.w}kg`) : `${last.w}kg`} {unit === "sec" ? `${last.r}秒` : `× ${last.r}reps`} × {last.s}sets
           </p>
           <button onClick={onPreset} className="mb-3 rounded-md px-2 py-1"
             style={{ color: C.accent, fontSize: 11, fontWeight: 700, background: "rgba(234,179,8,.10)" }}>
@@ -95,7 +98,7 @@ export function ExerciseCard({
                   {stages.map((st, idx) => (
                     <Fragment key={idx}>
                       {idx > 0 && <span style={{ color: C.mid, margin: "0 3px" }}>⤵</span>}
-                      {wText(st.weight, s.bodyweight)}<span style={{ color: C.mid, fontSize: 11, fontWeight: 600 }}>×{st.reps}</span>
+                      {wText(st.weight, s.bodyweight)}<span style={{ color: C.mid, fontSize: 11, fontWeight: 600 }}>{rText(st.reps, unit)}</span>
                     </Fragment>
                   ))}
                 </p>
@@ -131,8 +134,8 @@ export function ExerciseCard({
           <Counter value={draftWeight} unit="kg" onStep={onStepW} onSet={onSetW} bodyweight={bodyweight} />
         </div>
         <div>
-          <p style={{ color: C.lo, fontSize: 10, letterSpacing: 1.5, fontWeight: 700 }} className="mb-1 ml-1">REPS</p>
-          <Counter value={draftReps} unit="reps" onStep={onStepR} onSet={onSetR} />
+          <p style={{ color: C.lo, fontSize: 10, letterSpacing: 1.5, fontWeight: 700 }} className="mb-1 ml-1">{unit === "sec" ? "TIME（秒）" : "REPS"}</p>
+          <Counter value={draftReps} unit={unit === "sec" ? "秒" : "reps"} onStep={onStepR} onSet={onSetR} />
         </div>
       </div>
 

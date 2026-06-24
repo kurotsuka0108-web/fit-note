@@ -216,13 +216,19 @@ const EXERCISE_LIBRARY_SEED = {
   - `SetEditor` は `title` / `initialBodyweight` / `initialStages` を受け取り、**編集（既存上書き）と新規作成（ドロップ）を兼用**。
 - **Tactical Counter の誤作動修正**: +/- は押下即時ではなく**指を離した時**に1ステップ。移動しきい値超え/`pointercancel`（スクロール開始）は反応しない（`useHold` + `touchAction: pan-y`）。
 - **追加後スクロール**: 種目を追加すると**その新しいカードへスクロール**（`cardRefs` + `pendingScroll`）。
+- **時間種目（秒数記録）**: 種目は記録単位 `unit`（`reps`=回数 / `sec`=秒数）を持つ。
+  - シードの **プランクは既定で秒数**（`SEC_EXERCISES`）。オリジナル種目追加時に**回数/秒数を選択**でき、ライブラリに単位ごと記憶される。
+  - 秒数種目はカードの入力欄が「TIME（秒）」、増減は **5刻み**、初期値 自重ON・30秒。完了チップ/前回実績/編集パネルも「◯秒」表示。
+  - 種目チップには `秒`（Timer アイコン）バッジを表示。
 - **モーダルのスクロール対策**: シート/編集パネルは `FramePortal` で端末枠 `#fn-frame` 直下へ portal。ページのスクロール位置に依存せず常にビューポートを覆う（以前は一番下スクロール状態で開く不具合があった）。
 
 ### 9.3 データモデルの追加点
 
-- `WorkoutLog.groupId: string | null`（スーパーセット）。
-- `NoteRepo` に `createGroup(logIds)` / `ungroup(groupId)` / `updateSet(logId,setId,set)` を追加。local / supabase 両実装済み。
-- マイグレーション `supabase/migrations/0002_superset.sql`（`workout_logs.group_id` 追加）。
+- `WorkoutLog.groupId: string | null`（スーパーセット）/ `WorkoutLog.unit: "reps"|"sec"`（記録単位）。
+- `Library` は `Record<部位, { name, unit }[]>`（種目ごとに単位を保持）。`ExerciseDef` 型。
+- `NoteRepo` に `createGroup(logIds)` / `ungroup(groupId)` / `updateSet(logId,setId,set)` を追加。`addLog`/`addCustomExercise` は `unit` 引数を取る。local / supabase 両実装済み。
+- マイグレーション: `0002_superset.sql`（`workout_logs.group_id`）/ `0003_unit.sql`（`exercises.unit`・`workout_logs.unit`、プランクを sec に）。
+- localStorage 旧データ互換: `custom`(旧 string[]) と `unit` 未設定ログを読み込み時に正規化。
 
 ### 9.4 主要ファイル
 

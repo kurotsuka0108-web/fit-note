@@ -10,6 +10,7 @@ import {
   type LastSession,
   type Library,
   type NewSet,
+  type Unit,
   type WorkoutLog,
   type WorkoutSet,
 } from "@/lib/db";
@@ -51,13 +52,16 @@ type Draft = { weight: number; reps: number; bodyweight: boolean };
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 const NEW_DRAFT: Draft = { weight: 20, reps: 10, bodyweight: false };
+// 秒数種目は自重ON・30秒を初期値に（回数種目は通常の初期値）。
+const newDraftFor = (unit: Unit): Draft =>
+  unit === "sec" ? { weight: 0, reps: 30, bodyweight: true } : { ...NEW_DRAFT };
 
 // ログの初期ドラフト（記録中の重量・レップ・自重フラグ）。最新セットがあればそれを引き継ぐ。
 function draftFor(log: WorkoutLog): Draft {
   const last = log.sets[log.sets.length - 1];
   return last
     ? { weight: last.weight, reps: last.reps, bodyweight: last.bodyweight }
-    : { ...NEW_DRAFT };
+    : newDraftFor(log.unit);
 }
 
 export function NoteScreen() {
@@ -73,7 +77,7 @@ export function NoteScreen() {
   const [adding, setAdding] = useState(false);
   // セット編集／ドロップ新規作成パネルの対象。setId=null は新規ドロップセット作成。
   const [editor, setEditor] = useState<
-    { logId: string; setId: string | null; title: string; bodyweight: boolean; stages: { weight: number; reps: number }[] } | null
+    { logId: string; setId: string | null; title: string; unit: Unit; bodyweight: boolean; stages: { weight: number; reps: number }[] } | null
   >(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -135,8 +139,9 @@ export function NoteScreen() {
     setDrafts((p) => ({ ...p, [id]: { ...p[id], weight: Math.max(0, round1(p[id].weight + dir * 2.5)) } }));
   const setW = (id: string, v: number) =>
     setDrafts((p) => ({ ...p, [id]: { ...p[id], weight: round1(Math.max(0, v)) } }));
-  const stepR = (id: string, dir: 1 | -1) =>
-    setDrafts((p) => ({ ...p, [id]: { ...p[id], reps: Math.max(0, p[id].reps + dir) } }));
+  // 回数は1刻み、秒数は5刻みで増減
+  const stepR = (id: string, dir: 1 | -1, unit: Unit) =>
+    setDrafts((p) => ({ ...p, [id]: { ...p[id], reps: Math.max(0, p[id].reps + dir * (unit === "sec" ? 5 : 1)) } }));
   const setR = (id: string, v: number) =>
     setDrafts((p) => ({ ...p, [id]: { ...p[id], reps: Math.max(0, Math.round(v)) } }));
   const toggleBW = (id: string) =>
@@ -182,17 +187,17 @@ export function NoteScreen() {
   };
 
   // 完了セットのチップタップ → 編集
-  const openEditSet = (logId: string, set: WorkoutSet, index: number) =>
+  const openEditSet = (logId: string, unit: Unit, set: WorkoutSet, index: number) =>
     setEditor({
-      logId, setId: set.id, title: `SET ${index} を編集`, bodyweight: set.bodyweight,
+      logId, setId: set.id, title: `SET ${index} を編集`, unit, bodyweight: set.bodyweight,
       stages: [{ weight: set.weight, reps: set.reps }, ...set.drops.map((d) => ({ weight: d.weight, reps: d.reps }))],
     });
 
   // 「ドロップ」ボタン → 新規ドロップセットを SetEditor で組む（現在の入力値をトップ段に）
-  const openDropEditor = (logId: string) => {
-    const d = drafts[logId] ?? NEW_DRAFT;
+  const openDropEditor = (logId: string, unit: Unit) => {
+    const d = drafts[logId] ?? newDraftFor(unit);
     setEditor({
-      logId, setId: null, title: "ドロップセットを記録", bodyweight: d.bodyweight,
+      logId, setId: null, title: "ドロップセットを記録", unit, bodyweight: d.bodyweight,
       stages: [{ weight: d.weight, reps: d.reps }, { weight: d.weight, reps: 0 }],
     });
   };
@@ -239,19 +244,19 @@ export function NoteScreen() {
 
   /* ── スーパーセット（種目のグループ化） ── */
   // 「種目を追加」シートで選んだ複数種目を当日ログへ追加し、1つのスーパーセットにまとめる。
-  const addSuperset = async (items: { name: string; part: string }[]) => {
+  const addSuperset = async (items: { name: string; part: string; unit: Unit }[]) => {
     setAdding(false);
     if (items.length < 2) return;
     try {
       const created: WorkoutLog[] = [];
-      for (const it of items) created.push(await repo.addLog(active, it.name, it.part));
+      for (const it of items) created.push(await repo.addLog(active, it.name, it.part, it.unit));
       const ids = created.map((l) => l.id);
       const groupId = await repo.createGroup(ids);
       const withGroup = created.map((l) => ({ ...l, groupId }));
       setLogs((ls) => [...ls, ...withGroup]);
       setDrafts((p) => {
         const n = { ...p };
-        for (const l of created) n[l.id] = { ...NEW_DRAFT };
+        for (const l of created) n[l.id] = newDraftFor(l.unit);
         return n;
       });
       const lastEntries = await Promise.all(
@@ -273,13 +278,13 @@ export function NoteScreen() {
     }
   };
 
-  const addToday = async (name: string, part: string) => {
+  const addToday = async (name: string, part: string, unit: Unit) => {
     setAdding(false);
     try {
-      const log = await repo.addLog(active, name, part);
+      const log = await repo.addLog(active, name, part, unit);
       const last = await repo.getLastSession(active, name);
       setLogs((ls) => [...ls, log]);
-      setDrafts((p) => ({ ...p, [log.id]: { ...NEW_DRAFT } }));
+      setDrafts((p) => ({ ...p, [log.id]: newDraftFor(unit) }));
       setLasts((p) => ({ ...p, [log.id]: last }));
       scrollToCard(log.id); // #4: 追加した種目へスクロール
     } catch (e) {
@@ -287,14 +292,14 @@ export function NoteScreen() {
     }
   };
 
-  const addCustom = async (part: string, name: string) => {
+  const addCustom = async (part: string, name: string, unit: Unit) => {
     try {
-      await repo.addCustomExercise(part, name);
+      await repo.addCustomExercise(part, name, unit);
       setLibrary(await repo.getLibrary());
     } catch (e) {
       fail(e);
     }
-    await addToday(name, part);
+    await addToday(name, part, unit);
   };
 
   const todayNames = logs.map((l) => l.name);
@@ -304,17 +309,17 @@ export function NoteScreen() {
   const renderCard = (l: WorkoutLog, num: number) => (
     <div key={l.id} ref={(el) => { cardRefs.current[l.id] = el; }} style={{ scrollMarginTop: 12 }}>
       <ExerciseCard
-        index={num} log={l}
+        index={num} log={l} unit={l.unit}
         draftWeight={drafts[l.id]?.weight ?? NEW_DRAFT.weight}
         draftReps={drafts[l.id]?.reps ?? NEW_DRAFT.reps}
         bodyweight={drafts[l.id]?.bodyweight ?? false}
         last={lasts[l.id] ?? null}
         onStepW={(d) => stepW(l.id, d)} onSetW={(v) => setW(l.id, v)}
-        onStepR={(d) => stepR(l.id, d)} onSetR={(v) => setR(l.id, v)}
+        onStepR={(d) => stepR(l.id, d, l.unit)} onSetR={(v) => setR(l.id, v)}
         onToggleBW={() => toggleBW(l.id)}
-        onOpenDrop={() => openDropEditor(l.id)}
+        onOpenDrop={() => openDropEditor(l.id, l.unit)}
         onComplete={() => completeSet(l.id)} onRemoveSet={(sid) => removeSet(l.id, sid)}
-        onEditSet={(s) => openEditSet(l.id, s, l.sets.findIndex((x) => x.id === s.id) + 1)}
+        onEditSet={(s) => openEditSet(l.id, l.unit, s, l.sets.findIndex((x) => x.id === s.id) + 1)}
         onPreset={() => presetLast(l.id)} onRemove={() => removeLog(l.id)}
       />
     </div>
@@ -410,7 +415,7 @@ export function NoteScreen() {
 
       {editor && (
         <SetEditor
-          title={editor.title} initialBodyweight={editor.bodyweight} initialStages={editor.stages}
+          title={editor.title} unit={editor.unit} initialBodyweight={editor.bodyweight} initialStages={editor.stages}
           onSave={saveEditor} onClose={() => setEditor(null)}
         />
       )}

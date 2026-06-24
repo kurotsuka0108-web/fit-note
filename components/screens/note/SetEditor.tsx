@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Check, Plus, Trash2, X } from "lucide-react";
 import { useC } from "@/lib/use-tokens";
 import { ON_GOLD } from "@/lib/theme";
-import type { NewSet } from "@/lib/db";
+import type { NewSet, Unit } from "@/lib/db";
 import { Counter } from "./Counter";
 import { FramePortal } from "./FramePortal";
 
@@ -17,9 +17,10 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
    - 「ドロップ」ボタン → 新規ドロップセットの作成
    トップセット + 各ドロップ段の重量・レップ・自重を編集し、段の追加/削除もできる。 */
 export function SetEditor({
-  title, initialBodyweight, initialStages, onSave, onClose,
+  title, unit, initialBodyweight, initialStages, onSave, onClose,
 }: {
   title: string;
+  unit: Unit;
   initialBodyweight: boolean;
   initialStages: Stage[];
   onSave: (patch: NewSet) => void;
@@ -34,7 +35,7 @@ export function SetEditor({
   const stepW = (i: number, dir: 1 | -1) =>
     patch(i, { weight: Math.max(0, round1(stages[i].weight + dir * 2.5)) });
   const stepR = (i: number, dir: 1 | -1) =>
-    patch(i, { reps: Math.max(0, stages[i].reps + dir) });
+    patch(i, { reps: Math.max(0, stages[i].reps + dir * (unit === "sec" ? 5 : 1)) });
   const addStage = () =>
     setStages((arr) => [...arr, { weight: arr[arr.length - 1]?.weight ?? 0, reps: 0 }]);
   const removeStage = (i: number) => setStages((arr) => arr.filter((_, j) => j !== i));
@@ -87,8 +88,8 @@ export function SetEditor({
                   <Counter value={s.weight} unit="kg" bodyweight={bodyweight}
                     onStep={(d) => stepW(i, d)} onSet={(v) => patch(i, { weight: round1(Math.max(0, v)) })} />
                 </div>
-                <p style={{ color: C.lo, fontSize: 10, letterSpacing: 1.5, fontWeight: 700 }} className="mb-1 ml-1">REPS</p>
-                <Counter value={s.reps} unit="reps"
+                <p style={{ color: C.lo, fontSize: 10, letterSpacing: 1.5, fontWeight: 700 }} className="mb-1 ml-1">{unit === "sec" ? "TIME（秒）" : "REPS"}</p>
+                <Counter value={s.reps} unit={unit === "sec" ? "秒" : "reps"}
                   onStep={(d) => stepR(i, d)} onSet={(v) => patch(i, { reps: Math.max(0, Math.round(v)) })} />
               </div>
             ))}

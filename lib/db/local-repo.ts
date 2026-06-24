@@ -1,5 +1,5 @@
-import { BODY_PARTS, EXERCISE_LIBRARY_SEED } from "./seed";
-import type { Library, LastSession, NewSet, NoteRepo, WorkoutLog, WorkoutSet } from "./types";
+import { BODY_PARTS, defaultUnit, EXERCISE_LIBRARY_SEED } from "./seed";
+import type { ExerciseDef, Library, LastSession, NewSet, NoteRepo, Unit, WorkoutLog, WorkoutSet } from "./types";
 
 // Supabase 未設定時のフォールバック。ブラウザの localStorage に永続化する。
 // （リロードしても残る = 受け入れ基準を満たす。本番は Supabase 実装に切替）
@@ -16,13 +16,26 @@ const uid = (): string =>
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
+// 旧データ互換: custom は以前 string[] で保存していたため ExerciseDef[] へ正規化する。
+function normalizeCustom(custom: unknown): Library {
+  const out: Library = {};
+  if (!custom || typeof custom !== "object") return out;
+  for (const [part, list] of Object.entries(custom as Record<string, unknown>)) {
+    if (!Array.isArray(list)) continue;
+    out[part] = list.map((e): ExerciseDef =>
+      typeof e === "string" ? { name: e, unit: defaultUnit(e) } : (e as ExerciseDef),
+    );
+  }
+  return out;
+}
+
 function load(): Store {
   if (typeof window === "undefined") return { custom: {}, logs: [] };
   try {
     const raw = window.localStorage.getItem(KEY);
     if (!raw) return { custom: {}, logs: [] };
     const parsed = JSON.parse(raw) as Partial<Store>;
-    return { custom: parsed.custom ?? {}, logs: parsed.logs ?? [] };
+    return { custom: normalizeCustom(parsed.custom), logs: parsed.logs ?? [] };
   } catch {
     return { custom: {}, logs: [] };
   }
@@ -36,22 +49,23 @@ function save(store: Store): void {
 export class LocalNoteRepo implements NoteRepo {
   async getLibrary(): Promise<Library> {
     const { custom } = load();
-    // seed をベースに、ユーザー追加分を部位ごとにマージ（重複排除・seed順を維持）
+    // seed をベースに、ユーザー追加分を部位ごとにマージ（名前で重複排除・seed順を維持）
     const lib: Library = {};
     for (const part of BODY_PARTS) {
       const seeded = EXERCISE_LIBRARY_SEED[part] ?? [];
-      const added = (custom[part] ?? []).filter((n) => !seeded.includes(n));
+      const names = new Set(seeded.map((d) => d.name));
+      const added = (custom[part] ?? []).filter((d) => !names.has(d.name));
       lib[part] = [...seeded, ...added];
     }
     return lib;
   }
 
-  async addCustomExercise(part: string, name: string): Promise<void> {
+  async addCustomExercise(part: string, name: string, unit: Unit): Promise<void> {
     const store = load();
     const seeded = EXERCISE_LIBRARY_SEED[part] ?? [];
     const list = store.custom[part] ?? [];
-    if (seeded.includes(name) || list.includes(name)) return; // 重複は無視
-    store.custom[part] = [...list, name];
+    if (seeded.some((d) => d.name === name) || list.some((d) => d.name === name)) return; // 重複は無視
+    store.custom[part] = [...list, { name, unit }];
     save(store);
   }
 
@@ -59,15 +73,16 @@ export class LocalNoteRepo implements NoteRepo {
     return load()
       .logs.filter((l) => l.date === date)
       .sort((a, b) => a.order - b.order)
-      // 旧データ（bodyweight / drops / groupId 未保存）を正規化
+      // 旧データ（bodyweight / drops / groupId / unit 未保存）を正規化
       .map((l) => ({
         ...l,
         groupId: l.groupId ?? null,
+        unit: l.unit ?? "reps",
         sets: l.sets.map((s) => ({ ...s, bodyweight: s.bodyweight ?? false, drops: s.drops ?? [] })),
       }));
   }
 
-  async addLog(date: string, name: string, part: string): Promise<WorkoutLog> {
+  async addLog(date: string, name: string, part: string, unit: Unit): Promise<WorkoutLog> {
     const store = load();
     const sameDay = store.logs.filter((l) => l.date === date);
     const log: WorkoutLog = {
@@ -77,6 +92,7 @@ export class LocalNoteRepo implements NoteRepo {
       part,
       order: sameDay.length,
       groupId: null,
+      unit,
       sets: [],
     };
     store.logs.push(log);
