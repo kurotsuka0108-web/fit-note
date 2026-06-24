@@ -12,6 +12,9 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import { getServerSupabase } from "@/lib/supabase/server";
+import { DEMO_USER_ID } from "@/lib/env";
+import { DAILY_AI_LIMIT } from "@/lib/db/meal-types";
 
 export const runtime = "nodejs"; // 画像を扱うので Edge ではなく Node ランタイム
 
@@ -39,14 +42,17 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 入力: { imageBase64: string, mediaType?: string }
+  // 入力: { imageBase64: string, mediaType?: string, date?: string }
   // imageBase64 は data URL でも、プレフィックス無しの素の base64 でも可。
+  // date は無料プランの日次カウント基準日（クライアントのローカル日 YYYY-MM-DD）。
   let imageBase64: string | undefined;
   let mediaType = "image/jpeg";
+  let date: string | undefined;
   try {
     const body = await req.json();
     imageBase64 = body?.imageBase64;
     if (typeof body?.mediaType === "string") mediaType = body.mediaType;
+    if (typeof body?.date === "string") date = body.date;
   } catch {
     return NextResponse.json({ error: "リクエストボディが不正です" }, { status: 400 });
   }
@@ -58,6 +64,31 @@ export async function POST(req: NextRequest) {
   const dataUrl = imageBase64.startsWith("data:")
     ? imageBase64
     : `data:${mediaType};base64,${imageBase64}`;
+
+  // 無料プランの日次上限をサーバー側で判定（Supabase 構成時のみ）。
+  // 未構成（localStorage モード）はサーバーで永続化できないためスキップし、
+  // クライアント表示用カウントに委ねる（仕様 §3.3 / §6）。
+  const day = typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : new Date().toISOString().slice(0, 10);
+  const sb = await getServerSupabase();
+  if (sb) {
+    const { data: row, error } = await sb
+      .from("ai_usage")
+      .select("count")
+      .eq("user_id", DEMO_USER_ID)
+      .eq("date", day)
+      .maybeSingle();
+    if (error) {
+      console.error("[analyze-meal] usage read", error);
+      return NextResponse.json({ error: "利用状況の取得に失敗しました" }, { status: 500 });
+    }
+    const used = Number(row?.count) || 0;
+    if (used >= DAILY_AI_LIMIT) {
+      return NextResponse.json(
+        { error: "本日の無料解析を使い切りました", usage: { used, limit: DAILY_AI_LIMIT } },
+        { status: 429 },
+      );
+    }
+  }
 
   try {
     const openai = getOpenAI();
@@ -96,7 +127,24 @@ export async function POST(req: NextRequest) {
       c: clampInt(parsed.c),
     };
 
-    return NextResponse.json(result);
+    // 解析成功時に日次カウントを +1（Supabase 構成時のみ。判定の正本はサーバー側）。
+    let usage: { used: number; limit: number } | null = null;
+    if (sb) {
+      const { data: cur } = await sb
+        .from("ai_usage")
+        .select("count")
+        .eq("user_id", DEMO_USER_ID)
+        .eq("date", day)
+        .maybeSingle();
+      const next = (Number(cur?.count) || 0) + 1;
+      const { error: upErr } = await sb
+        .from("ai_usage")
+        .upsert({ user_id: DEMO_USER_ID, date: day, count: next, updated_at: new Date().toISOString() });
+      if (upErr) console.error("[analyze-meal] usage upsert", upErr);
+      else usage = { used: next, limit: DAILY_AI_LIMIT };
+    }
+
+    return NextResponse.json({ ...result, usage });
   } catch (err: any) {
     console.error("[analyze-meal]", err);
     const status = typeof err?.status === "number" ? err.status : 500;
