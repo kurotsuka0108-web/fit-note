@@ -76,6 +76,7 @@ export function useHold(onStep: () => void) {
       touchAction: "pan-y" as const,
       userSelect: "none" as const,
       WebkitUserSelect: "none" as const,
+      WebkitTouchCallout: "none" as const, // iOS の長押しコールアウト（選択/調べる等）を抑止
     },
   };
 }
