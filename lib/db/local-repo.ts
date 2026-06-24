@@ -1,4 +1,4 @@
-import { BODY_PARTS, defaultUnit, EXERCISE_LIBRARY_SEED } from "./seed";
+import { BODY_PARTS, DEFAULT_INTERVAL_SEC, defaultUnit, EXERCISE_LIBRARY_SEED } from "./seed";
 import type { ExerciseDef, Library, LastSession, NewSet, NoteRepo, Unit, WorkoutLog, WorkoutSet } from "./types";
 
 // Supabase 未設定時のフォールバック。ブラウザの localStorage に永続化する。
@@ -73,11 +73,12 @@ export class LocalNoteRepo implements NoteRepo {
     return load()
       .logs.filter((l) => l.date === date)
       .sort((a, b) => a.order - b.order)
-      // 旧データ（bodyweight / drops / groupId / unit 未保存）を正規化
+      // 旧データ（bodyweight / drops / groupId / unit / intervalSec 未保存）を正規化
       .map((l) => ({
         ...l,
         groupId: l.groupId ?? null,
         unit: l.unit ?? "reps",
+        intervalSec: l.intervalSec ?? DEFAULT_INTERVAL_SEC,
         sets: l.sets.map((s) => ({ ...s, bodyweight: s.bodyweight ?? false, drops: s.drops ?? [] })),
       }));
   }
@@ -93,6 +94,7 @@ export class LocalNoteRepo implements NoteRepo {
       order: sameDay.length,
       groupId: null,
       unit,
+      intervalSec: DEFAULT_INTERVAL_SEC,
       sets: [],
     };
     store.logs.push(log);
@@ -103,6 +105,14 @@ export class LocalNoteRepo implements NoteRepo {
   async removeLog(logId: string): Promise<void> {
     const store = load();
     store.logs = store.logs.filter((l) => l.id !== logId);
+    save(store);
+  }
+
+  async setLogInterval(logId: string, intervalSec: number): Promise<void> {
+    const store = load();
+    const log = store.logs.find((l) => l.id === logId);
+    if (!log) return;
+    log.intervalSec = Math.max(0, Math.round(intervalSec));
     save(store);
   }
 

@@ -220,15 +220,20 @@ const EXERCISE_LIBRARY_SEED = {
   - シードの **プランクは既定で秒数**（`SEC_EXERCISES`）。オリジナル種目追加時に**回数/秒数を選択**でき、ライブラリに単位ごと記憶される。
   - 秒数種目はカードの入力欄が「TIME（秒）」、増減は **5刻み**、初期値 自重ON・30秒。完了チップ/前回実績/編集パネルも「◯秒」表示。
   - 種目チップには `秒`（Timer アイコン）バッジを表示。
+- **タイマー（`TimerOverlay`、全画面カウントダウン）**
+  - **実施タイマー（work）**: 秒数種目はカードのボタンが「**スタート**」に変化。押すと設定秒数のカウントダウン → 完了で**実施秒数を記録** → 休憩へ。スキップ時は経過秒数を記録。
+  - **インターバル（rest）**: セット記録後に休憩タイマーを表示（回数種目は「完了」後、秒数種目は実施後）。`WorkoutLog.intervalSec`（既定60、0=無し）で**種目ごとに編集可**（カードの「休憩 −/＋/数字タップ」）。
+  - タイマー画面は ±10秒・一時停止/再開・スキップ・やめる、完了時に振動（`navigator.vibrate`）。
+  - 注: スーパーセットの「まとめてセット完了」はタイマーを挟まず即記録（バッチ用途）。
 - **モーダルのスクロール対策**: シート/編集パネルは `FramePortal` で端末枠 `#fn-frame` 直下へ portal。ページのスクロール位置に依存せず常にビューポートを覆う（以前は一番下スクロール状態で開く不具合があった）。
 
 ### 9.3 データモデルの追加点
 
-- `WorkoutLog.groupId: string | null`（スーパーセット）/ `WorkoutLog.unit: "reps"|"sec"`（記録単位）。
+- `WorkoutLog.groupId: string | null`（スーパーセット）/ `WorkoutLog.unit: "reps"|"sec"`（記録単位）/ `WorkoutLog.intervalSec: number`（休憩秒、既定60）。
 - `Library` は `Record<部位, { name, unit }[]>`（種目ごとに単位を保持）。`ExerciseDef` 型。
-- `NoteRepo` に `createGroup(logIds)` / `ungroup(groupId)` / `updateSet(logId,setId,set)` を追加。`addLog`/`addCustomExercise` は `unit` 引数を取る。local / supabase 両実装済み。
-- マイグレーション: `0002_superset.sql`（`workout_logs.group_id`）/ `0003_unit.sql`（`exercises.unit`・`workout_logs.unit`、プランクを sec に）。
-- localStorage 旧データ互換: `custom`(旧 string[]) と `unit` 未設定ログを読み込み時に正規化。
+- `NoteRepo` に `createGroup` / `ungroup` / `updateSet` / `setLogInterval` を追加。`addLog`/`addCustomExercise` は `unit` 引数を取る。local / supabase 両実装済み。
+- マイグレーション: `0002_superset.sql`（`group_id`）/ `0003_unit.sql`（`exercises.unit`・`workout_logs.unit`、プランクを sec に）/ `0004_interval.sql`（`workout_logs.interval_sec`）。
+- localStorage 旧データ互換: `custom`(旧 string[]) と `unit`/`intervalSec` 未設定ログを読み込み時に正規化。
 
 ### 9.4 主要ファイル
 

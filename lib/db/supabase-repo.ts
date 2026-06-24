@@ -14,6 +14,7 @@ type LogRow = {
   order: number;
   group_id: string | null;
   unit: Unit | null;
+  interval_sec: number | null;
   workout_sets:
     | { id: string; weight: number; reps: number; set_index: number; bodyweight: boolean; drops: SetStage[] | null }[]
     | null;
@@ -29,10 +30,10 @@ function toLog(row: LogRow): WorkoutLog {
       bodyweight: s.bodyweight,
       drops: (s.drops ?? []).map((d) => ({ weight: Number(d.weight), reps: d.reps })),
     }));
-  return { id: row.id, date: row.date, name: row.name, part: row.body_part, order: row.order, groupId: row.group_id ?? null, unit: row.unit ?? "reps", sets };
+  return { id: row.id, date: row.date, name: row.name, part: row.body_part, order: row.order, groupId: row.group_id ?? null, unit: row.unit ?? "reps", intervalSec: row.interval_sec ?? 60, sets };
 }
 
-const LOG_SELECT = 'id,date,name,body_part,order:"order",group_id,unit,workout_sets(id,weight,reps,set_index,bodyweight,drops)';
+const LOG_SELECT = 'id,date,name,body_part,order:"order",group_id,unit,interval_sec,workout_sets(id,weight,reps,set_index,bodyweight,drops)';
 
 export class SupabaseNoteRepo implements NoteRepo {
   constructor(private sb: SupabaseClient) {}
@@ -91,6 +92,14 @@ export class SupabaseNoteRepo implements NoteRepo {
 
   async removeLog(logId: string): Promise<void> {
     const { error } = await this.sb.from("workout_logs").delete().eq("id", logId);
+    if (error) throw error;
+  }
+
+  async setLogInterval(logId: string, intervalSec: number): Promise<void> {
+    const { error } = await this.sb
+      .from("workout_logs")
+      .update({ interval_sec: Math.max(0, Math.round(intervalSec)) })
+      .eq("id", logId);
     if (error) throw error;
   }
 

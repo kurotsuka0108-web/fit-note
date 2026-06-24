@@ -17,6 +17,17 @@ import {
 import { ExerciseCard } from "./ExerciseCard";
 import { AddExerciseSheet } from "./AddExerciseSheet";
 import { SetEditor } from "./SetEditor";
+import { TimerOverlay } from "./TimerOverlay";
+
+type TimerState = {
+  key: number;
+  seconds: number;
+  title: string;
+  subtitle: string;
+  kind: "work" | "rest";
+  onDone: (elapsed: number) => void;
+  onCancel: () => void;
+};
 
 // 描画用ブロック: 単独種目 or スーパーセット（出現順にクラスタリング）
 type Block =
@@ -81,6 +92,8 @@ export function NoteScreen() {
   >(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  const [timer, setTimer] = useState<TimerState | null>(null);
+  const timerSeq = useRef(0);
 
   // 追加直後にその種目カードへスクロールするための参照と対象ID（ref で管理し state 更新を避ける）
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -160,9 +173,54 @@ export function NoteScreen() {
     setLogs((ls) => ls.map((l) => (l.id === id ? { ...l, sets: [...l.sets, set] } : l)));
   };
 
+  const openTimer = (t: Omit<TimerState, "key">) =>
+    setTimer({ ...t, key: ++timerSeq.current });
+
+  // セット記録後のインターバル（休憩）タイマー。intervalSec<=0 なら出さない。
+  const startRest = (log: WorkoutLog) => {
+    if (log.intervalSec <= 0) { setTimer(null); return; }
+    openTimer({
+      seconds: log.intervalSec, title: "インターバル", subtitle: "休憩", kind: "rest",
+      onDone: () => setTimer(null), onCancel: () => setTimer(null),
+    });
+  };
+
+  // 回数種目: 「完了」→ 記録 → 休憩タイマー
   const completeSet = async (id: string) => {
+    const log = logs.find((l) => l.id === id);
     try {
       await recordSet(id);
+    } catch (e) {
+      fail(e);
+      return;
+    }
+    if (log) startRest(log);
+  };
+
+  // 秒数種目: 「スタート」→ 実施タイマー → 実施秒数で記録 → 休憩タイマー
+  const startWork = (id: string) => {
+    const log = logs.find((l) => l.id === id);
+    const d = drafts[id];
+    if (!log || !d) return;
+    openTimer({
+      seconds: Math.max(1, d.reps), title: log.name, subtitle: "実施中", kind: "work",
+      onDone: async (elapsed) => {
+        try {
+          const set = await repo.addSet(id, { weight: d.weight, reps: Math.max(0, elapsed), bodyweight: d.bodyweight, drops: [] });
+          setLogs((ls) => ls.map((l) => (l.id === id ? { ...l, sets: [...l.sets, set] } : l)));
+        } catch (e) {
+          fail(e);
+        }
+        startRest(log);
+      },
+      onCancel: () => setTimer(null),
+    });
+  };
+
+  const changeInterval = async (id: string, sec: number) => {
+    setLogs((ls) => ls.map((l) => (l.id === id ? { ...l, intervalSec: Math.max(0, sec) } : l)));
+    try {
+      await repo.setLogInterval(id, sec);
     } catch (e) {
       fail(e);
     }
@@ -309,7 +367,7 @@ export function NoteScreen() {
   const renderCard = (l: WorkoutLog, num: number) => (
     <div key={l.id} ref={(el) => { cardRefs.current[l.id] = el; }} style={{ scrollMarginTop: 12 }}>
       <ExerciseCard
-        index={num} log={l} unit={l.unit}
+        index={num} log={l} unit={l.unit} intervalSec={l.intervalSec}
         draftWeight={drafts[l.id]?.weight ?? NEW_DRAFT.weight}
         draftReps={drafts[l.id]?.reps ?? NEW_DRAFT.reps}
         bodyweight={drafts[l.id]?.bodyweight ?? false}
@@ -318,7 +376,9 @@ export function NoteScreen() {
         onStepR={(d) => stepR(l.id, d, l.unit)} onSetR={(v) => setR(l.id, v)}
         onToggleBW={() => toggleBW(l.id)}
         onOpenDrop={() => openDropEditor(l.id, l.unit)}
-        onComplete={() => completeSet(l.id)} onRemoveSet={(sid) => removeSet(l.id, sid)}
+        onSetInterval={(sec) => changeInterval(l.id, sec)}
+        onComplete={() => completeSet(l.id)} onStart={() => startWork(l.id)}
+        onRemoveSet={(sid) => removeSet(l.id, sid)}
         onEditSet={(s) => openEditSet(l.id, l.unit, s, l.sets.findIndex((x) => x.id === s.id) + 1)}
         onPreset={() => presetLast(l.id)} onRemove={() => removeLog(l.id)}
       />
@@ -417,6 +477,13 @@ export function NoteScreen() {
         <SetEditor
           title={editor.title} unit={editor.unit} initialBodyweight={editor.bodyweight} initialStages={editor.stages}
           onSave={saveEditor} onClose={() => setEditor(null)}
+        />
+      )}
+
+      {timer && (
+        <TimerOverlay
+          key={timer.key} seconds={timer.seconds} title={timer.title} subtitle={timer.subtitle}
+          kind={timer.kind} onComplete={timer.onDone} onCancel={timer.onCancel}
         />
       )}
     </div>

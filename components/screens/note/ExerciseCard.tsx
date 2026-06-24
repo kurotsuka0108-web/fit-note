@@ -1,7 +1,7 @@
 "use client";
 
-import { Fragment, useEffect, useRef } from "react";
-import { Check, ChevronsDown, Pencil, Trash2, X } from "lucide-react";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { Check, ChevronsDown, Pencil, Play, Timer, Trash2, X } from "lucide-react";
 import { useC } from "@/lib/use-tokens";
 import { ON_GOLD } from "@/lib/theme";
 import type { LastSession, Unit, WorkoutLog, WorkoutSet } from "@/lib/db";
@@ -12,15 +12,50 @@ const wText = (w: number, bw: boolean) => (bw ? (w === 0 ? "自重" : `自重+${
 // レップ/秒の表示テキスト（reps→×10 / sec→10秒）
 const rText = (reps: number, unit: Unit) => (unit === "sec" ? ` ${reps}秒` : `×${reps}`);
 
+/* インターバル秒の編集（±10 と数字タップ直接入力）。0=タイマー無し。 */
+function IntervalEditor({ value, onSet }: { value: number; onSet: (v: number) => void }) {
+  const C = useC();
+  const [editing, setEditing] = useState(false);
+  const [tmp, setTmp] = useState("");
+  const commit = () => {
+    const n = parseInt(tmp, 10);
+    if (Number.isFinite(n)) onSet(Math.max(0, n));
+    setEditing(false);
+  };
+  const step = (d: number) => onSet(Math.max(0, value + d));
+  return (
+    <div className="flex items-center gap-2 mb-2 ml-1">
+      <Timer size={14} style={{ color: C.lo }} />
+      <span style={{ color: C.lo, fontSize: 11, fontWeight: 700 }}>休憩</span>
+      <button onClick={() => step(-10)} aria-label="休憩-10秒"
+        className="rounded-md" style={{ width: 26, height: 26, background: C.tactical, color: C.mid, border: `1px solid ${C.border}`, fontWeight: 800 }}>−</button>
+      {editing ? (
+        <input autoFocus type="number" inputMode="numeric" value={tmp}
+          onChange={(e) => setTmp(e.target.value)} onBlur={commit}
+          onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+          style={{ width: 44, textAlign: "center", background: "transparent", color: C.accent, fontSize: 13, fontWeight: 800, outline: "none", borderBottom: `1px solid ${C.accent}` }} />
+      ) : (
+        <button onClick={() => { setTmp(String(value)); setEditing(true); }}
+          style={{ color: value > 0 ? C.hi : C.lo, fontSize: 13, fontWeight: 800, borderBottom: `1px dashed ${C.lo}`, minWidth: 44, textAlign: "center" }}>
+          {value > 0 ? `${value}秒` : "なし"}
+        </button>
+      )}
+      <button onClick={() => step(10)} aria-label="休憩+10秒"
+        className="rounded-md" style={{ width: 26, height: 26, background: C.tactical, color: C.mid, border: `1px solid ${C.border}`, fontWeight: 800 }}>＋</button>
+    </div>
+  );
+}
+
 /* 種目カード（仕様 §3.2）。横並びセット・Tactical Counter・前回プリセットを内包。 */
 export function ExerciseCard({
-  index, log, unit, draftWeight, draftReps, bodyweight, last,
-  onStepW, onSetW, onStepR, onSetR, onToggleBW, onOpenDrop,
-  onComplete, onRemoveSet, onEditSet, onPreset, onRemove,
+  index, log, unit, intervalSec, draftWeight, draftReps, bodyweight, last,
+  onStepW, onSetW, onStepR, onSetR, onToggleBW, onOpenDrop, onSetInterval,
+  onComplete, onStart, onRemoveSet, onEditSet, onPreset, onRemove,
 }: {
   index: number;
   log: WorkoutLog;
   unit: Unit;
+  intervalSec: number;
   draftWeight: number;
   draftReps: number;
   bodyweight: boolean;
@@ -31,7 +66,9 @@ export function ExerciseCard({
   onSetR: (v: number) => void;
   onToggleBW: () => void;
   onOpenDrop: () => void;
+  onSetInterval: (sec: number) => void;
   onComplete: () => void;
+  onStart: () => void;
   onRemoveSet: (setId: string) => void;
   onEditSet: (set: WorkoutSet) => void;
   onPreset: () => void;
@@ -139,17 +176,27 @@ export function ExerciseCard({
         </div>
       </div>
 
+      <IntervalEditor value={intervalSec} onSet={onSetInterval} />
+
       <div className="flex gap-2">
         <button onClick={onOpenDrop}
           className="rounded-xl flex items-center justify-center gap-1 px-3"
           style={{ minHeight: 56, background: C.tactical, color: C.accent, fontWeight: 800, fontSize: 14, border: `1px solid ${C.border}`, flexShrink: 0 }}>
           <ChevronsDown size={18} /> ドロップ
         </button>
-        <button onClick={onComplete}
-          className="flex-1 rounded-xl flex items-center justify-center gap-2"
-          style={{ minHeight: 56, background: C.accent, color: ON_GOLD, fontWeight: 800, fontSize: 16, cursor: "pointer" }}>
-          <Check size={18} /> SET {nextSet} 完了
-        </button>
+        {unit === "sec" ? (
+          <button onClick={onStart}
+            className="flex-1 rounded-xl flex items-center justify-center gap-2"
+            style={{ minHeight: 56, background: C.accent, color: ON_GOLD, fontWeight: 800, fontSize: 16, cursor: "pointer" }}>
+            <Play size={18} /> SET {nextSet} スタート
+          </button>
+        ) : (
+          <button onClick={onComplete}
+            className="flex-1 rounded-xl flex items-center justify-center gap-2"
+            style={{ minHeight: 56, background: C.accent, color: ON_GOLD, fontWeight: 800, fontSize: 16, cursor: "pointer" }}>
+            <Check size={18} /> SET {nextSet} 完了
+          </button>
+        )}
       </div>
     </div>
   );

@@ -31,6 +31,7 @@ export type WorkoutLog = {
   // 同一 groupId のログはスーパーセット（交互に実施する種目の束）。null=単独種目。
   groupId: string | null;
   unit: Unit; // 記録単位（回数 / 秒数）
+  intervalSec: number; // セット間インターバル（休憩）秒。0=タイマー無し
   sets: WorkoutSet[];
 };
 
@@ -53,6 +54,8 @@ export interface NoteRepo {
   addLog(date: string, name: string, part: string, unit: Unit): Promise<WorkoutLog>;
   /** 種目ログを削除（セットも連動削除） */
   removeLog(logId: string): Promise<void>;
+  /** セット間インターバル（休憩秒）を更新 */
+  setLogInterval(logId: string, intervalSec: number): Promise<void>;
 
   /** 指定ログ群を1つのスーパーセットにまとめ、割り当てた groupId を返す */
   createGroup(logIds: string[]): Promise<string>;

@@ -13,6 +13,9 @@ const SEED_NAMES: Record<string, string[]> = {
   "体幹": ["プランク", "クランチ", "レッグレイズ", "アブローラー"],
 };
 
+// 新規ログの既定インターバル（休憩秒）。
+export const DEFAULT_INTERVAL_SEC = 60;
+
 // 既定で秒数記録にする種目（時間種目）。
 export const SEC_EXERCISES = new Set<string>(["プランク"]);
 
