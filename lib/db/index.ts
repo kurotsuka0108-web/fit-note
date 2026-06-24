@@ -6,7 +6,7 @@ import { SupabaseNoteRepo } from "./supabase-repo";
 import type { NoteRepo } from "./types";
 
 export * from "./types";
-export { BODY_PARTS, EXERCISE_LIBRARY_SEED } from "./seed";
+export { BODY_PARTS, DEFAULT_INTERVAL_SEC, EXERCISE_LIBRARY_SEED } from "./seed";
 
 let repo: NoteRepo | null = null;
 

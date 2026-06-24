@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { DEMO_USER_ID } from "@/lib/env";
 import { BODY_PARTS } from "./seed";
-import type { Library, LastSession, NewSet, NoteRepo, SetStage, WorkoutLog, WorkoutSet } from "./types";
+import type { Library, LastSession, NewSet, NoteRepo, SetStage, Unit, WorkoutLog, WorkoutSet } from "./types";
 
 // Supabase 実装。migration 0001_init_note.sql のスキーマに対応。
 // RLS はデモユーザー(DEMO_USER_ID)に限定（フェーズ2で auth.uid() に差し替え）。
@@ -12,6 +12,9 @@ type LogRow = {
   name: string;
   body_part: string;
   order: number;
+  group_id: string | null;
+  unit: Unit | null;
+  interval_sec: number | null;
   workout_sets:
     | { id: string; weight: number; reps: number; set_index: number; bodyweight: boolean; drops: SetStage[] | null }[]
     | null;
@@ -27,10 +30,10 @@ function toLog(row: LogRow): WorkoutLog {
       bodyweight: s.bodyweight,
       drops: (s.drops ?? []).map((d) => ({ weight: Number(d.weight), reps: d.reps })),
     }));
-  return { id: row.id, date: row.date, name: row.name, part: row.body_part, order: row.order, sets };
+  return { id: row.id, date: row.date, name: row.name, part: row.body_part, order: row.order, groupId: row.group_id ?? null, unit: row.unit ?? "reps", intervalSec: row.interval_sec ?? 60, sets };
 }
 
-const LOG_SELECT = 'id,date,name,body_part,order:"order",workout_sets(id,weight,reps,set_index,bodyweight,drops)';
+const LOG_SELECT = 'id,date,name,body_part,order:"order",group_id,unit,interval_sec,workout_sets(id,weight,reps,set_index,bodyweight,drops)';
 
 export class SupabaseNoteRepo implements NoteRepo {
   constructor(private sb: SupabaseClient) {}
@@ -38,7 +41,7 @@ export class SupabaseNoteRepo implements NoteRepo {
   async getLibrary(): Promise<Library> {
     const { data, error } = await this.sb
       .from("exercises")
-      .select("body_part,name,created_at")
+      .select("body_part,name,unit,interval_sec,created_at")
       .or(`user_id.is.null,user_id.eq.${DEMO_USER_ID}`)
       .order("created_at", { ascending: true });
     if (error) throw error;
@@ -47,17 +50,27 @@ export class SupabaseNoteRepo implements NoteRepo {
     for (const part of BODY_PARTS) lib[part] = [];
     for (const row of data ?? []) {
       const part = row.body_part as string;
-      (lib[part] ??= []).push(row.name as string);
+      (lib[part] ??= []).push({ name: row.name as string, unit: ((row.unit as Unit) ?? "reps"), intervalSec: (row.interval_sec as number) ?? 60 });
     }
     return lib;
   }
 
-  async addCustomExercise(part: string, name: string): Promise<void> {
+  async addCustomExercise(part: string, name: string, unit: Unit): Promise<void> {
     const { error } = await this.sb
       .from("exercises")
-      .insert({ user_id: DEMO_USER_ID, body_part: part, name, is_custom: true });
+      .insert({ user_id: DEMO_USER_ID, body_part: part, name, unit, is_custom: true });
     // 23505 = unique 制約違反（重複）。重複は無視する。
     if (error && error.code !== "23505") throw error;
+  }
+
+  async setExerciseInterval(name: string, intervalSec: number): Promise<void> {
+    // ユーザー所有の同名種目の既定インターバルを更新（共通テンプレは RLS で更新不可のため対象外）。
+    const { error } = await this.sb
+      .from("exercises")
+      .update({ interval_sec: Math.max(0, Math.round(intervalSec)) })
+      .eq("user_id", DEMO_USER_ID)
+      .eq("name", name);
+    if (error) throw error;
   }
 
   async getLogs(date: string): Promise<WorkoutLog[]> {
@@ -71,7 +84,7 @@ export class SupabaseNoteRepo implements NoteRepo {
     return ((data ?? []) as unknown as LogRow[]).map(toLog);
   }
 
-  async addLog(date: string, name: string, part: string): Promise<WorkoutLog> {
+  async addLog(date: string, name: string, part: string, unit: Unit, intervalSec: number): Promise<WorkoutLog> {
     const { count } = await this.sb
       .from("workout_logs")
       .select("id", { count: "exact", head: true })
@@ -80,7 +93,7 @@ export class SupabaseNoteRepo implements NoteRepo {
 
     const { data, error } = await this.sb
       .from("workout_logs")
-      .insert({ user_id: DEMO_USER_ID, date, name, body_part: part, order: count ?? 0 })
+      .insert({ user_id: DEMO_USER_ID, date, name, body_part: part, order: count ?? 0, unit, interval_sec: Math.max(0, Math.round(intervalSec)) })
       .select(LOG_SELECT)
       .single();
     if (error) throw error;
@@ -89,6 +102,29 @@ export class SupabaseNoteRepo implements NoteRepo {
 
   async removeLog(logId: string): Promise<void> {
     const { error } = await this.sb.from("workout_logs").delete().eq("id", logId);
+    if (error) throw error;
+  }
+
+  async setLogInterval(logId: string, intervalSec: number): Promise<void> {
+    const { error } = await this.sb
+      .from("workout_logs")
+      .update({ interval_sec: Math.max(0, Math.round(intervalSec)) })
+      .eq("id", logId);
+    if (error) throw error;
+  }
+
+  async createGroup(logIds: string[]): Promise<string> {
+    const groupId =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const { error } = await this.sb.from("workout_logs").update({ group_id: groupId }).in("id", logIds);
+    if (error) throw error;
+    return groupId;
+  }
+
+  async ungroup(groupId: string): Promise<void> {
+    const { error } = await this.sb.from("workout_logs").update({ group_id: null }).eq("group_id", groupId);
     if (error) throw error;
   }
 
@@ -108,6 +144,23 @@ export class SupabaseNoteRepo implements NoteRepo {
         bodyweight: set.bodyweight,
         drops: set.drops,
       })
+      .select("id,weight,reps,bodyweight,drops")
+      .single();
+    if (error) throw error;
+    return {
+      id: data.id as string,
+      weight: Number(data.weight),
+      reps: data.reps as number,
+      bodyweight: data.bodyweight as boolean,
+      drops: ((data.drops ?? []) as SetStage[]).map((d) => ({ weight: Number(d.weight), reps: d.reps })),
+    };
+  }
+
+  async updateSet(_logId: string, setId: string, set: NewSet): Promise<WorkoutSet> {
+    const { data, error } = await this.sb
+      .from("workout_sets")
+      .update({ weight: set.weight, reps: set.reps, bodyweight: set.bodyweight, drops: set.drops })
+      .eq("id", setId)
       .select("id,weight,reps,bodyweight,drops")
       .single();
     if (error) throw error;

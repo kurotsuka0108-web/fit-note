@@ -1,32 +1,80 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Check, Link2, Plus, Unlink } from "lucide-react";
 import { useC } from "@/lib/use-tokens";
 import { ON_GOLD } from "@/lib/theme";
 import { currentWeek, todayYmd } from "@/lib/date";
 import {
+  DEFAULT_INTERVAL_SEC,
   getNoteRepo,
   type LastSession,
   type Library,
-  type SetStage,
+  type NewSet,
+  type Unit,
   type WorkoutLog,
+  type WorkoutSet,
 } from "@/lib/db";
 import { ExerciseCard } from "./ExerciseCard";
 import { AddExerciseSheet } from "./AddExerciseSheet";
+import { SetEditor } from "./SetEditor";
+import { TimerOverlay } from "./TimerOverlay";
+import { IntervalEditor } from "./IntervalEditor";
 
-// drops = 確定前のドロップ段（トップセット側）。完了時に現在値が最終段として連結される。
-type Draft = { weight: number; reps: number; bodyweight: boolean; drops: SetStage[] };
+type TimerState = {
+  key: number;
+  seconds: number;
+  title: string;
+  subtitle: string;
+  kind: "work" | "rest";
+  onDone: (elapsed: number) => void;
+  onCancel: () => void;
+};
+
+// 描画用ブロック: 単独種目 or スーパーセット（出現順にクラスタリング）
+type Block =
+  | { kind: "single"; log: WorkoutLog; num: number }
+  | { kind: "group"; groupId: string; label: string; items: { log: WorkoutLog; num: number }[] };
+
+// ログ配列を、groupId が初出した位置にグループを束ねたブロック列へ変換する。
+// カード番号(num)は画面の見た目の並び順に振り直す。
+function toBlocks(logs: WorkoutLog[]): Block[] {
+  const blocks: Block[] = [];
+  const byGroup = new Map<string, Extract<Block, { kind: "group" }>>();
+  let num = 0;
+  let letter = 0;
+  for (const log of logs) {
+    num += 1;
+    if (log.groupId) {
+      let b = byGroup.get(log.groupId);
+      if (!b) {
+        b = { kind: "group", groupId: log.groupId, label: String.fromCharCode(65 + letter++), items: [] };
+        byGroup.set(log.groupId, b);
+        blocks.push(b);
+      }
+      b.items.push({ log, num });
+    } else {
+      blocks.push({ kind: "single", log, num });
+    }
+  }
+  return blocks;
+}
+
+// 記録中の単発入力値。ドロップ（多段）は SetEditor で組むのでここには持たない。
+type Draft = { weight: number; reps: number; bodyweight: boolean };
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
-const NEW_DRAFT: Draft = { weight: 20, reps: 10, bodyweight: false, drops: [] };
+const NEW_DRAFT: Draft = { weight: 20, reps: 10, bodyweight: false };
+// 秒数種目は自重ON・30秒を初期値に（回数種目は通常の初期値）。
+const newDraftFor = (unit: Unit): Draft =>
+  unit === "sec" ? { weight: 0, reps: 30, bodyweight: true } : { ...NEW_DRAFT };
 
 // ログの初期ドラフト（記録中の重量・レップ・自重フラグ）。最新セットがあればそれを引き継ぐ。
 function draftFor(log: WorkoutLog): Draft {
   const last = log.sets[log.sets.length - 1];
   return last
-    ? { weight: last.weight, reps: last.reps, bodyweight: last.bodyweight, drops: [] }
-    : { ...NEW_DRAFT };
+    ? { weight: last.weight, reps: last.reps, bodyweight: last.bodyweight }
+    : newDraftFor(log.unit);
 }
 
 export function NoteScreen() {
@@ -40,8 +88,34 @@ export function NoteScreen() {
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [lasts, setLasts] = useState<Record<string, LastSession>>({});
   const [adding, setAdding] = useState(false);
+  // セット編集／ドロップ新規作成パネルの対象。setId=null は新規ドロップセット作成。
+  const [editor, setEditor] = useState<
+    { logId: string; setId: string | null; title: string; unit: Unit; bodyweight: boolean; stages: { weight: number; reps: number }[] } | null
+  >(null);
+  // 直近に組んだドロップ構成を種目ごとに記憶（次セットの初期値として復元し再入力を省く）
+  const [lastDrop, setLastDrop] = useState<Record<string, { bodyweight: boolean; stages: { weight: number; reps: number }[] }>>({});
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  const [timer, setTimer] = useState<TimerState | null>(null);
+  const timerSeq = useRef(0);
+
+  // 追加直後にその種目カードへスクロールするための参照と対象ID（ref で管理し state 更新を避ける）
+  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const pendingScroll = useRef<string | null>(null);
+  const scrollToCard = (id: string) => { pendingScroll.current = id; };
+  // 即時スクロール（タイマー終了後など logs 更新を伴わない場面用）
+  const scrollToCardNow = (id: string) => {
+    requestAnimationFrame(() => cardRefs.current[id]?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
+  useEffect(() => {
+    const id = pendingScroll.current;
+    if (!id) return;
+    const el = cardRefs.current[id];
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      pendingScroll.current = null;
+    }
+  }, [logs]);
 
   const fail = (e: unknown) => {
     console.error("[NoteScreen]", e);
@@ -86,37 +160,117 @@ export function NoteScreen() {
     setDrafts((p) => ({ ...p, [id]: { ...p[id], weight: Math.max(0, round1(p[id].weight + dir * 2.5)) } }));
   const setW = (id: string, v: number) =>
     setDrafts((p) => ({ ...p, [id]: { ...p[id], weight: round1(Math.max(0, v)) } }));
-  const stepR = (id: string, dir: 1 | -1) =>
-    setDrafts((p) => ({ ...p, [id]: { ...p[id], reps: Math.max(0, p[id].reps + dir) } }));
+  // 回数は1刻み、秒数は5刻みで増減
+  const stepR = (id: string, dir: 1 | -1, unit: Unit) =>
+    setDrafts((p) => ({ ...p, [id]: { ...p[id], reps: Math.max(0, p[id].reps + dir * (unit === "sec" ? 5 : 1)) } }));
   const setR = (id: string, v: number) =>
     setDrafts((p) => ({ ...p, [id]: { ...p[id], reps: Math.max(0, Math.round(v)) } }));
+  // 自重をONにしたら重量は0kgスタート（純粋な自重）。OFFは重量を据え置き。
   const toggleBW = (id: string) =>
-    setDrafts((p) => ({ ...p, [id]: { ...p[id], bodyweight: !p[id].bodyweight } }));
-  // 現在の重量・レップを1段として確定し、次の（より軽い）段の入力に移る
-  const addDrop = (id: string) =>
-    setDrafts((p) => ({ ...p, [id]: { ...p[id], drops: [...p[id].drops, { weight: p[id].weight, reps: p[id].reps }] } }));
-  const clearDrops = (id: string) =>
-    setDrafts((p) => ({ ...p, [id]: { ...p[id], drops: [] } }));
+    setDrafts((p) => {
+      const bw = !p[id].bodyweight;
+      return { ...p, [id]: { ...p[id], bodyweight: bw, weight: bw ? 0 : p[id].weight } };
+    });
   const presetLast = (id: string) => {
     const l = lasts[id];
-    if (l) setDrafts((p) => ({ ...p, [id]: { weight: l.w, reps: l.r, bodyweight: l.bw, drops: [] } }));
+    if (l) setDrafts((p) => ({ ...p, [id]: { weight: l.w, reps: l.r, bodyweight: l.bw } }));
   };
 
   /* ── 永続化操作 ── */
-  const completeSet = async (id: string) => {
+  // 1種目分の単発セットを記録（重量・レップ・自重は次セットへ継続）。ドロップは SetEditor 経由。
+  const recordSet = async (id: string) => {
     const d = drafts[id];
     if (!d) return;
-    // 連鎖 = これまでのドロップ段 + 現在入力中の値（最終段）。先頭がトップセット。
-    const stages = [...d.drops, { weight: d.weight, reps: d.reps }];
-    const [top, ...rest] = stages;
+    const set = await repo.addSet(id, { weight: d.weight, reps: d.reps, bodyweight: d.bodyweight, drops: [] });
+    setLogs((ls) => ls.map((l) => (l.id === id ? { ...l, sets: [...l.sets, set] } : l)));
+  };
+
+  const openTimer = (t: Omit<TimerState, "key">) =>
+    setTimer({ ...t, key: ++timerSeq.current });
+
+  // セット記録後のインターバル（休憩）タイマー。intervalSec<=0 なら出さない。
+  // afterDone は完了時（自然完了/スキップ）に呼ぶ追加処理（例: スーパーセット先頭へ戻る）。
+  const startRest = (log: WorkoutLog, afterDone?: () => void) => {
+    if (log.intervalSec <= 0) { setTimer(null); afterDone?.(); return; }
+    openTimer({
+      seconds: log.intervalSec, title: "インターバル", subtitle: "休憩", kind: "rest",
+      onDone: () => { setTimer(null); afterDone?.(); }, onCancel: () => setTimer(null),
+    });
+  };
+
+  // 回数種目: 「完了」→ 記録 → 休憩タイマー
+  const completeSet = async (id: string) => {
+    const log = logs.find((l) => l.id === id);
     try {
-      const set = await repo.addSet(id, { weight: top.weight, reps: top.reps, bodyweight: d.bodyweight, drops: rest });
-      setLogs((ls) => ls.map((l) => (l.id === id ? { ...l, sets: [...l.sets, set] } : l)));
-      // 連鎖はリセット（重量・レップ・自重は次セットへ継続）
-      setDrafts((p) => ({ ...p, [id]: { ...p[id], drops: [] } }));
+      await recordSet(id);
+    } catch (e) {
+      fail(e);
+      return;
+    }
+    if (log) startRest(log);
+  };
+
+  // 秒数種目: 「スタート」→ 実施タイマー → 実施秒数で記録 → 休憩タイマー
+  const startWork = (id: string) => {
+    const log = logs.find((l) => l.id === id);
+    const d = drafts[id];
+    if (!log || !d) return;
+    openTimer({
+      seconds: Math.max(1, d.reps), title: log.name, subtitle: "実施中", kind: "work",
+      onDone: async (elapsed) => {
+        try {
+          const set = await repo.addSet(id, { weight: d.weight, reps: Math.max(0, elapsed), bodyweight: d.bodyweight, drops: [] });
+          setLogs((ls) => ls.map((l) => (l.id === id ? { ...l, sets: [...l.sets, set] } : l)));
+        } catch (e) {
+          fail(e);
+        }
+        startRest(log);
+      },
+      onCancel: () => setTimer(null),
+    });
+  };
+
+  // インターバル変更: その日のログを更新し、種目の既定としても記憶（次回同じ種目で復元）。
+  const changeInterval = async (id: string, sec: number) => {
+    const log = logs.find((l) => l.id === id);
+    const v = Math.max(0, sec);
+    setLogs((ls) => ls.map((l) => (l.id === id ? { ...l, intervalSec: v } : l)));
+    try {
+      await repo.setLogInterval(id, v);
+      if (log) await repo.setExerciseInterval(log.name, v);
+      setLibrary(await repo.getLibrary()); // 記憶した既定を反映（同セッションの再追加でも復元）
     } catch (e) {
       fail(e);
     }
+  };
+
+  // スーパーセットの休憩はグループ全員へ反映（各種目の既定としても記憶）。
+  const changeGroupInterval = async (groupId: string, sec: number) => {
+    const members = logs.filter((l) => l.groupId === groupId);
+    const v = Math.max(0, sec);
+    setLogs((ls) => ls.map((l) => (l.groupId === groupId ? { ...l, intervalSec: v } : l)));
+    try {
+      for (const m of members) {
+        await repo.setLogInterval(m.id, v);
+        await repo.setExerciseInterval(m.name, v);
+      }
+      setLibrary(await repo.getLibrary());
+    } catch (e) {
+      fail(e);
+    }
+  };
+
+  // スーパーセットのまとめて記録: グループ内の全種目を現在の入力値で1セットずつ記録（1ラウンド）→ 休憩。
+  const completeGroup = async (groupId: string) => {
+    const members = logs.filter((l) => l.groupId === groupId);
+    try {
+      for (const m of members) await recordSet(m.id);
+    } catch (e) {
+      fail(e);
+      return;
+    }
+    // グループ代表のインターバルで休憩 → 終了後はスーパーセット1種目目へ戻る
+    if (members[0]) startRest(members[0], () => scrollToCardNow(members[0].id));
   };
 
   const removeSet = async (id: string, setId: string) => {
@@ -128,41 +282,157 @@ export function NoteScreen() {
     }
   };
 
+  // 完了セットのチップタップ → 編集
+  const openEditSet = (logId: string, unit: Unit, set: WorkoutSet, index: number) =>
+    setEditor({
+      logId, setId: set.id, title: `SET ${index} を編集`, unit, bodyweight: set.bodyweight,
+      stages: [{ weight: set.weight, reps: set.reps }, ...set.drops.map((d) => ({ weight: d.weight, reps: d.reps }))],
+    });
+
+  // 「ドロップ」ボタン → 新規ドロップセットを SetEditor で組む。
+  // 直近のドロップ構成があればそれを初期値に（2セット目以降を1から組み直さない）。
+  const openDropEditor = (logId: string, unit: Unit) => {
+    const tmpl = lastDrop[logId];
+    const d = drafts[logId] ?? newDraftFor(unit);
+    setEditor({
+      logId, setId: null, title: "ドロップセットを記録", unit,
+      bodyweight: tmpl ? tmpl.bodyweight : d.bodyweight,
+      stages: tmpl ? tmpl.stages.map((s) => ({ ...s })) : [{ weight: d.weight, reps: d.reps }, { weight: d.weight, reps: 0 }],
+    });
+  };
+
+  // 編集パネルの保存（#1 既存編集 / ドロップ新規作成 を兼ねる）
+  const saveEditor = async (patch: NewSet) => {
+    if (!editor) return;
+    const { logId, setId } = editor;
+    setEditor(null);
+    try {
+      if (setId) {
+        const updated = await repo.updateSet(logId, setId, patch);
+        setLogs((ls) => ls.map((l) => (l.id === logId ? { ...l, sets: l.sets.map((s) => (s.id === setId ? updated : s)) } : l)));
+      } else {
+        const created = await repo.addSet(logId, patch);
+        setLogs((ls) => ls.map((l) => (l.id === logId ? { ...l, sets: [...l.sets, created] } : l)));
+        setDrafts((p) => ({ ...p, [logId]: { weight: patch.weight, reps: patch.reps, bodyweight: patch.bodyweight } }));
+      }
+      // ドロップ構成（2段以上）は次セットの初期値として記憶
+      if (patch.drops.length > 0) {
+        setLastDrop((p) => ({
+          ...p,
+          [logId]: { bodyweight: patch.bodyweight, stages: [{ weight: patch.weight, reps: patch.reps }, ...patch.drops.map((d) => ({ ...d }))] },
+        }));
+      }
+    } catch (e) {
+      fail(e);
+    }
+  };
+
   const removeLog = async (id: string) => {
+    const removed = logs.find((l) => l.id === id);
     try {
       await repo.removeLog(id);
-      setLogs((ls) => ls.filter((l) => l.id !== id));
+      let next = logs.filter((l) => l.id !== id);
+      // グループのメンバーが1つだけになったらスーパーセットを解散する
+      if (removed?.groupId) {
+        const left = next.filter((l) => l.groupId === removed.groupId);
+        if (left.length < 2) {
+          await repo.ungroup(removed.groupId);
+          next = next.map((l) => (l.groupId === removed.groupId ? { ...l, groupId: null } : l));
+        }
+      }
+      setLogs(next);
       setDrafts((p) => { const n = { ...p }; delete n[id]; return n; });
       setLasts((p) => { const n = { ...p }; delete n[id]; return n; });
+      setLastDrop((p) => { const n = { ...p }; delete n[id]; return n; });
     } catch (e) {
       fail(e);
     }
   };
 
-  const addToday = async (name: string, part: string) => {
+  /* ── スーパーセット（種目のグループ化） ── */
+  // 「種目を追加」シートで選んだ複数種目を当日ログへ追加し、1つのスーパーセットにまとめる。
+  const addSuperset = async (items: { name: string; part: string; unit: Unit; intervalSec: number }[]) => {
+    setAdding(false);
+    if (items.length < 2) return;
+    try {
+      const created: WorkoutLog[] = [];
+      for (const it of items) created.push(await repo.addLog(active, it.name, it.part, it.unit, it.intervalSec));
+      const ids = created.map((l) => l.id);
+      const groupId = await repo.createGroup(ids);
+      const withGroup = created.map((l) => ({ ...l, groupId }));
+      setLogs((ls) => [...ls, ...withGroup]);
+      setDrafts((p) => {
+        const n = { ...p };
+        for (const l of created) n[l.id] = newDraftFor(l.unit);
+        return n;
+      });
+      const lastEntries = await Promise.all(
+        created.map(async (l) => [l.id, await repo.getLastSession(active, l.name)] as const),
+      );
+      setLasts((p) => ({ ...p, ...Object.fromEntries(lastEntries) }));
+      if (created[0]) scrollToCard(created[0].id); // #4: 追加した先頭種目へスクロール
+    } catch (e) {
+      fail(e);
+    }
+  };
+
+  const dissolveGroup = async (groupId: string) => {
+    try {
+      await repo.ungroup(groupId);
+      setLogs((ls) => ls.map((l) => (l.groupId === groupId ? { ...l, groupId: null } : l)));
+    } catch (e) {
+      fail(e);
+    }
+  };
+
+  const addToday = async (name: string, part: string, unit: Unit, intervalSec: number) => {
     setAdding(false);
     try {
-      const log = await repo.addLog(active, name, part);
+      const log = await repo.addLog(active, name, part, unit, intervalSec);
       const last = await repo.getLastSession(active, name);
       setLogs((ls) => [...ls, log]);
-      setDrafts((p) => ({ ...p, [log.id]: { ...NEW_DRAFT } }));
+      setDrafts((p) => ({ ...p, [log.id]: newDraftFor(unit) }));
       setLasts((p) => ({ ...p, [log.id]: last }));
+      scrollToCard(log.id); // #4: 追加した種目へスクロール
     } catch (e) {
       fail(e);
     }
   };
 
-  const addCustom = async (part: string, name: string) => {
+  const addCustom = async (part: string, name: string, unit: Unit) => {
     try {
-      await repo.addCustomExercise(part, name);
+      await repo.addCustomExercise(part, name, unit);
       setLibrary(await repo.getLibrary());
     } catch (e) {
       fail(e);
     }
-    await addToday(name, part);
+    await addToday(name, part, unit, DEFAULT_INTERVAL_SEC);
   };
 
   const todayNames = logs.map((l) => l.name);
+  const blocks = toBlocks(logs);
+
+  // 1種目分のカード（単独・グループ内で共通）。ラッパー div に ref を付けて追加後スクロールに使う。
+  const renderCard = (l: WorkoutLog, num: number) => (
+    <div key={l.id} ref={(el) => { cardRefs.current[l.id] = el; }} style={{ scrollMarginTop: 12 }}>
+      <ExerciseCard
+        index={num} log={l} unit={l.unit} intervalSec={l.intervalSec} grouped={!!l.groupId}
+        draftWeight={drafts[l.id]?.weight ?? NEW_DRAFT.weight}
+        draftReps={drafts[l.id]?.reps ?? NEW_DRAFT.reps}
+        bodyweight={drafts[l.id]?.bodyweight ?? false}
+        last={lasts[l.id] ?? null}
+        onStepW={(d) => stepW(l.id, d)} onSetW={(v) => setW(l.id, v)}
+        onStepR={(d) => stepR(l.id, d, l.unit)} onSetR={(v) => setR(l.id, v)}
+        onToggleBW={() => toggleBW(l.id)}
+        onOpenDrop={() => openDropEditor(l.id, l.unit)}
+        onSetInterval={(sec) => changeInterval(l.id, sec)}
+        onComplete={() => completeSet(l.id)} onStart={() => startWork(l.id)}
+        onRemoveSet={(sid) => removeSet(l.id, sid)}
+        onEditSet={(s) => openEditSet(l.id, l.unit, s, l.sets.findIndex((x) => x.id === s.id) + 1)}
+        onPreset={() => presetLast(l.id)} onRemove={() => removeLog(l.id)}
+      />
+    </div>
+  );
 
   return (
     // min-height: 100% でボディ領域いっぱいに広げ、AddExerciseSheet（absolute inset-0）の
@@ -201,22 +471,35 @@ export function NoteScreen() {
       )}
 
       <div className="space-y-3">
-        {logs.map((l, i) => (
-          <ExerciseCard
-            key={l.id} index={i + 1} log={l}
-            draftWeight={drafts[l.id]?.weight ?? NEW_DRAFT.weight}
-            draftReps={drafts[l.id]?.reps ?? NEW_DRAFT.reps}
-            bodyweight={drafts[l.id]?.bodyweight ?? false}
-            drops={drafts[l.id]?.drops ?? []}
-            last={lasts[l.id] ?? null}
-            onStepW={(d) => stepW(l.id, d)} onSetW={(v) => setW(l.id, v)}
-            onStepR={(d) => stepR(l.id, d)} onSetR={(v) => setR(l.id, v)}
-            onToggleBW={() => toggleBW(l.id)}
-            onAddDrop={() => addDrop(l.id)} onClearDrops={() => clearDrops(l.id)}
-            onComplete={() => completeSet(l.id)} onRemoveSet={(sid) => removeSet(l.id, sid)}
-            onPreset={() => presetLast(l.id)} onRemove={() => removeLog(l.id)}
-          />
-        ))}
+        {blocks.map((b) =>
+          b.kind === "single" ? (
+            renderCard(b.log, b.num)
+          ) : (
+            <div key={b.groupId} className="rounded-2xl p-2"
+              style={{ background: "rgba(234,179,8,.06)", border: `1px solid ${C.accent}` }}>
+              <div className="flex items-center justify-between px-2 pt-1 pb-2">
+                <span className="flex items-center gap-1.5" style={{ color: C.accent, fontSize: 11, fontWeight: 800, letterSpacing: 1 }}>
+                  <Link2 size={14} /> SUPERSET {b.label} · {b.items.length}種目
+                </span>
+                <button onClick={() => dissolveGroup(b.groupId)} className="flex items-center gap-1" style={{ color: C.lo, fontSize: 11, fontWeight: 700 }}>
+                  <Unlink size={13} /> 解除
+                </button>
+              </div>
+              <div className="space-y-2">
+                {b.items.map((it) => renderCard(it.log, it.num))}
+              </div>
+              {/* グループ共通の休憩設定 + 1ラウンドまとめて記録 → 休憩タイマー */}
+              <div className="px-1 pt-2">
+                <IntervalEditor value={b.items[0]?.log.intervalSec ?? 60} onSet={(sec) => changeGroupInterval(b.groupId, sec)} />
+              </div>
+              <button onClick={() => completeGroup(b.groupId)}
+                className="w-full rounded-xl flex items-center justify-center gap-2 mt-1"
+                style={{ minHeight: 52, background: C.accent, color: ON_GOLD, fontWeight: 800, fontSize: 15 }}>
+                <Check size={18} /> まとめてセット完了（{b.items.length}種目）
+              </button>
+            </div>
+          ),
+        )}
         {!loading && logs.length === 0 && (
           <div className="rounded-2xl p-6 text-center" style={{ background: C.surface, border: `1px dashed ${C.border}` }}>
             <p style={{ color: C.mid, fontSize: 13, lineHeight: 1.7 }}>まだ種目がありません。<br />下のボタンから追加しましょう。</p>
@@ -238,7 +521,21 @@ export function NoteScreen() {
       {adding && (
         <AddExerciseSheet
           library={library} todayNames={todayNames}
-          onPick={addToday} onAddCustom={addCustom} onClose={() => setAdding(false)}
+          onPick={addToday} onAddCustom={addCustom} onAddSuperset={addSuperset} onClose={() => setAdding(false)}
+        />
+      )}
+
+      {editor && (
+        <SetEditor
+          title={editor.title} unit={editor.unit} initialBodyweight={editor.bodyweight} initialStages={editor.stages}
+          onSave={saveEditor} onClose={() => setEditor(null)}
+        />
+      )}
+
+      {timer && (
+        <TimerOverlay
+          key={timer.key} seconds={timer.seconds} title={timer.title} subtitle={timer.subtitle}
+          kind={timer.kind} onComplete={timer.onDone} onCancel={timer.onCancel}
         />
       )}
     </div>

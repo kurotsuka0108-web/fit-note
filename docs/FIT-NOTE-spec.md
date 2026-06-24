@@ -185,3 +185,75 @@ const EXERCISE_LIBRARY_SEED = {
 - [ ] 全体: ダーク／ライト切替が機能し、トークンが §2 と一致する
 - [ ] 全体: PWA としてホーム画面追加・全画面起動できる
 - [ ] 認証: デモログインで即操作開始できる
+
+---
+
+## 9. 実装進捗・引き継ぎメモ（最終更新: 2026-06-24）
+
+> 次に作業する人が「どこまで出来ているか」を把握するための生きたメモ。新機能を足したら追記すること。
+
+### 9.1 フェーズ進捗
+
+| フェーズ | 状態 | 補足 |
+|---|---|---|
+| 0 環境構築 | ✅ 完了 | Next.js 16 + TS + Tailwind v4 + next-themes + PWA manifest |
+| 1 NOTE (CRUD) | ✅ 完了 + 拡張 | 下記 9.2 の追加機能まで実装済み |
+| 2 ユーザー登録・PFC算出 | ⬜ 未着手 | 次の候補 |
+| 3 SHOKUJI (GPT-4o) | 🟡 ルート雛形のみ | `app/api/analyze-meal/route.ts` は雛形。画面は未実装（ナビは ComingSoon） |
+| 4 PWA仕上げ・README | ⬜ 一部のみ | manifest 済 |
+
+### 9.2 NOTE 画面の追加実装（仕様 §3.2 を超える部分）
+
+- **スーパーセット（種目グループ化）**
+  - 作成は **「種目を追加」シート内**で行う: シート上部の「スーパーセットを組む」をON → テンプレ種目を複数タップ（選択順を番号表示）→「N種目でスーパーセット作成」で当日ログへ一括追加しグループ化。
+  - 表示: 同一 `groupId` のカードを「SUPERSET A/B…」枠で束ね、枠下に **「まとめてセット完了」**（全種目を現在値で1ラウンド記録）と **「解除」** を表示。
+  - 種目削除でメンバーが1つになったグループは自動解散。
+- **ドロップセット（SetEditor で組む）**
+  - 種目カードの **「ドロップ」ボタン → `SetEditor` が開く**。現在の入力値をトップ段に、各段の**重量・レップ・自重・ドロップ段の追加/削除**を編集して保存すると新規セットとして記録される（`repo.addSet`）。
+  - **直近のドロップ構成を種目ごとに記憶**（`lastDrop`）。2セット目以降は前回の段構成が初期値で開くので組み直し不要。
+- **自重トグル**: 自重をONにすると重量は **0kg スタート**（純粋な自重）。秒数種目の初期値も自重ON・0kg。
+- **長押し対策**: 全ボタンに `-webkit-touch-callout/user-select: none`（globals.css）。+/- は `useHold` の `touchAction: pan-y` と併用。
+  - 記録中の単発入力（Counter）には多段を持たせない。「SET n 完了」は単発セットを記録するのみ。
+  - 保存形: 先頭=トップセット、`drops[]`=2段目以降。完了チップ表示は `⤵` で連結。
+- **完了セットの編集**: 横並びセットのチップを**タップすると `SetEditor`** が開く（新規ドロップ作成と同じパネル）。各段の重量・レップ・自重を修正、ドロップ段の追加/削除も可。保存で `repo.updateSet`。
+  - `SetEditor` は `title` / `initialBodyweight` / `initialStages` を受け取り、**編集（既存上書き）と新規作成（ドロップ）を兼用**。
+- **Tactical Counter の誤作動修正**: +/- は押下即時ではなく**指を離した時**に1ステップ。移動しきい値超え/`pointercancel`（スクロール開始）は反応しない（`useHold` + `touchAction: pan-y`）。
+- **追加後スクロール**: 種目を追加すると**その新しいカードへスクロール**（`cardRefs` + `pendingScroll`）。
+- **時間種目（秒数記録）**: 種目は記録単位 `unit`（`reps`=回数 / `sec`=秒数）を持つ。
+  - シードの **プランクは既定で秒数**（`SEC_EXERCISES`）。オリジナル種目追加時に**回数/秒数を選択**でき、ライブラリに単位ごと記憶される。
+  - 秒数種目はカードの入力欄が「TIME（秒）」、増減は **5刻み**、初期値 自重ON・30秒。完了チップ/前回実績/編集パネルも「◯秒」表示。
+  - 種目チップには `秒`（Timer アイコン）バッジを表示。
+- **タイマー（`TimerOverlay`、全画面カウントダウン）**
+  - **実施タイマー（work）**: 秒数種目はカードのボタンが「**スタート**」に変化。押すと設定秒数のカウントダウン → 完了で**実施秒数を記録** → 休憩へ。スキップ時は経過秒数を記録。
+  - **インターバル（rest）**: セット記録後に休憩タイマーを表示（回数種目は「完了」後、秒数種目は実施後、スーパーセットは「まとめてセット完了」後）。`WorkoutLog.intervalSec`（既定60、0=無し）で**種目ごとに編集可**（カード/グループ枠の「休憩 −/＋/数字タップ」）。
+  - **インターバルは種目ごとに記憶**: 変更すると `repo.setExerciseInterval(name)` で既定として保存され、次回同じ種目を追加したとき復元される（local は `intervalByName`、supabase は `exercises.interval_sec`／共通テンプレは RLS で更新不可）。`ExerciseDef.intervalSec` がライブラリ経由で `addLog` に渡る。
+  - タイマー画面は ±10秒・一時停止/再開・スキップ・やめる、完了時に振動（`navigator.vibrate`）。
+- **スーパーセットの一括操作**: グループ内のカードは**個別の完了/スタート・ドロップ・休憩UIを出さない**。グループ枠に**1つの「まとめてセット完了」**＋**共通の休憩設定**を表示し、完了で全種目を記録→休憩タイマー。休憩変更はグループ全員の既定に反映。
+- **モーダルのスクロール対策**: シート/編集パネルは `FramePortal` で端末枠 `#fn-frame` 直下へ portal。ページのスクロール位置に依存せず常にビューポートを覆う（以前は一番下スクロール状態で開く不具合があった）。
+
+### 9.3 データモデルの追加点
+
+- `WorkoutLog.groupId: string | null`（スーパーセット）/ `WorkoutLog.unit: "reps"|"sec"`（記録単位）/ `WorkoutLog.intervalSec: number`（休憩秒、既定60）。
+- `Library` は `Record<部位, { name, unit, intervalSec }[]>`（種目ごとに単位・既定休憩を保持）。`ExerciseDef` 型。
+- `NoteRepo` に `createGroup` / `ungroup` / `updateSet` / `setLogInterval` / `setExerciseInterval` を追加。`addLog` は `unit, intervalSec`、`addCustomExercise` は `unit` を取る。local / supabase 両実装済み。
+- マイグレーション: `0002_superset.sql`（`group_id`）/ `0003_unit.sql`（`exercises.unit`・`workout_logs.unit`、プランクを sec に）/ `0004_interval.sql`（`workout_logs.interval_sec`）/ `0005_exercise_interval.sql`（`exercises.interval_sec`）。
+- localStorage 旧データ互換: `custom`(旧 string[]) と `unit`/`intervalSec` 未設定ログを読み込み時に正規化。種目別休憩は `intervalByName` に保存。
+
+### 9.4 主要ファイル
+
+- 画面: `components/screens/note/NoteScreen.tsx`（状態の中枢）
+- 種目カード: `ExerciseCard.tsx` / カウンター: `Counter.tsx` + `useHold.ts`
+- シート類: `AddExerciseSheet.tsx`（種目追加＋スーパーセット作成）/ `SetEditor.tsx`（完了セット編集）/ `FramePortal.tsx`
+- データ層: `lib/db/`（`types.ts` 契約 / `local-repo.ts` / `supabase-repo.ts` / `index.ts` でフォールバック切替）
+
+### 9.5 既知の注意点
+
+- Supabase env 未設定時は **localStorage 永続化**で動作（キー `fitnote.note.v1`）。Vercel プレビューもこのモード。
+- `eslint` は React 19 の厳格ルールで既存ファイル含め数件 error（`set-state-in-effect` / refs）。**`next build` は eslint を通さず通過**するためデプロイは可能。気になるなら別途整理。
+- スーパーセット作成は当日ログへ追加するフロー。既に追加済みの単独種目を後から束ねるUIは現状なし（必要なら追加検討）。
+
+### 9.6 次の一手の候補
+
+1. フェーズ2（ユーザー登録・初期PFC算出）
+2. フェーズ3（SHOKUJI 画面 + GPT-4o 連携。ルート雛形は用意済み）
+3. NOTE 仕上げ（前回実績プリセットの精度、スーパーセットの並び替え等）

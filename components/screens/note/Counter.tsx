@@ -45,7 +45,7 @@ export function Counter({
   return (
     <div className="flex items-stretch rounded-2xl overflow-hidden"
       style={{ background: C.tactical, border: `1px solid ${C.border}` }}>
-      <button aria-label="減らす" {...dec} style={btn}><Minus size={26} /></button>
+      <button aria-label="減らす" {...dec} style={{ ...btn, ...dec.style }}><Minus size={26} style={{ pointerEvents: "none" }} /></button>
       <div className="flex-1 flex flex-col items-center justify-center py-2 leading-none">
         {editing ? (
           <input
@@ -57,7 +57,8 @@ export function Counter({
             style={{ background: "transparent", color: C.accent, fontSize: 30, fontWeight: 800, outline: "none", fontVariantNumeric: "tabular-nums" }}
           />
         ) : (
-          <button onClick={startEdit} aria-label={`${unit}を直接入力`} style={{ background: "transparent", cursor: "text" }}>
+          <button onClick={startEdit} aria-label={`${unit}を直接入力`}
+            style={{ background: "transparent", cursor: "text", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
             {bodyweight ? (
               <span style={{ color: C.hi, fontSize: value === 0 ? 26 : 22, fontWeight: 800, borderBottom: `1px dashed ${C.lo}`, paddingBottom: 1 }}>
                 {value === 0 ? (
@@ -78,7 +79,7 @@ export function Counter({
           </button>
         )}
       </div>
-      <button aria-label="増やす" {...inc} style={btn}><Plus size={26} /></button>
+      <button aria-label="増やす" {...inc} style={{ ...btn, ...inc.style }}><Plus size={26} style={{ pointerEvents: "none" }} /></button>
     </div>
   );
 }
