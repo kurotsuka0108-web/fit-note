@@ -305,6 +305,7 @@ export function NoteScreen() {
   const saveEditor = async (patch: NewSet) => {
     if (!editor) return;
     const { logId, setId } = editor;
+    const log = logs.find((l) => l.id === logId);
     setEditor(null);
     try {
       if (setId) {
@@ -322,6 +323,8 @@ export function NoteScreen() {
           [logId]: { bodyweight: patch.bodyweight, stages: [{ weight: patch.weight, reps: patch.reps }, ...patch.drops.map((d) => ({ ...d }))] },
         }));
       }
+      // 新規記録（ドロップセット）は単発セット完了と同様に休憩タイマーへ。編集（既存上書き）では出さない。
+      if (!setId && log) startRest(log);
     } catch (e) {
       fail(e);
     }

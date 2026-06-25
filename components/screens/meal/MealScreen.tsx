@@ -392,8 +392,10 @@ function DraftSheet({
                   <input
                     type="number"
                     inputMode="numeric"
-                    value={draft[k] as number}
+                    // 0 のときは空表示（placeholder の "0"）にして、先頭ゼロ（例: 08）を防ぐ
+                    value={(draft[k] as number) === 0 ? "" : (draft[k] as number)}
                     onChange={(e) => setNum(k, e.target.value)}
+                    placeholder="0"
                     className="w-full"
                     style={{ minHeight: 48, background: "transparent", color: C.hi, fontSize: 16, fontWeight: 700, outline: "none", fontVariantNumeric: "tabular-nums" }}
                   />
