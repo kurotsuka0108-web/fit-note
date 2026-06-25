@@ -5,9 +5,10 @@ import { useTheme } from "next-themes";
 import { BarChart3, Dumbbell, Moon, Signal, Sun, Utensils } from "lucide-react";
 import { useC } from "@/lib/use-tokens";
 import { ON_GOLD } from "@/lib/theme";
+import { MealUsageProvider, useMealUsage } from "@/lib/meal-usage";
 import { DataScreen } from "@/components/screens/DataScreen";
-import { ComingSoon } from "@/components/screens/ComingSoon";
 import { NoteScreen } from "@/components/screens/note/NoteScreen";
+import { MealScreen } from "@/components/screens/meal/MealScreen";
 
 type Tab = "note" | "meal" | "data";
 
@@ -19,23 +20,34 @@ const NAV: { key: Tab; label: string; Icon: typeof Dumbbell }[] = [
 
 const HEADER: Record<Tab, { right: string; solid: boolean }> = {
   note: { right: "GYM MODE", solid: true },
-  meal: { right: "FREE PLAN (3/3)", solid: false },
+  meal: { right: "FREE PLAN", solid: false }, // 残回数はバッジ側で動的に付与
   data: { right: "PREMIUM", solid: false },
 };
 
 /**
- * 共通シェル（仕様 §3.1）。ステータスバー風 / ヘッダー（ロゴ・テーマ切替・バッジ）/
- * 永続グローバルナビ。テーマは next-themes に委譲。
+ * 共通シェル（仕様 §3.1）。SHOKUJI の AI 残回数バッジを共有するため
+ * MealUsageProvider でラップする。
  */
 export function AppShell() {
+  return (
+    <MealUsageProvider>
+      <Shell />
+    </MealUsageProvider>
+  );
+}
+
+function Shell() {
   const C = useC();
   const [tab, setTab] = useState<Tab>("note");
   const { resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
+  const { usage, remaining } = useMealUsage();
   const isDark = !mounted || resolvedTheme !== "light";
   const header = HEADER[tab];
+  // SHOKUJI タブのバッジは「FREE PLAN 残/3」を動的表示（仕様 §3.1 / §3.3）
+  const badgeText = tab === "meal" && usage.ready ? `FREE PLAN ${remaining}/${usage.limit}` : header.right;
 
   return (
     <div
@@ -82,7 +94,7 @@ export function AppShell() {
                 border: header.solid ? "none" : `1px solid ${C.border}`,
               }}
             >
-              {header.right}
+              {badgeText}
             </span>
           </div>
         </div>
@@ -90,7 +102,7 @@ export function AppShell() {
         {/* body */}
         <div className="flex-1 overflow-y-auto fn-scroll">
           {tab === "note" && <NoteScreen />}
-          {tab === "meal" && <ComingSoon title="SHOKUJI（AI食事管理）" note="フェーズ3で GPT-4o 連携を実装します。" />}
+          {tab === "meal" && <MealScreen />}
           {tab === "data" && <DataScreen />}
         </div>
 

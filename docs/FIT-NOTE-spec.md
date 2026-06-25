@@ -198,8 +198,8 @@ const EXERCISE_LIBRARY_SEED = {
 |---|---|---|
 | 0 環境構築 | ✅ 完了 | Next.js 16 + TS + Tailwind v4 + next-themes + PWA manifest |
 | 1 NOTE (CRUD) | ✅ 完了 + 拡張 | 下記 9.2 の追加機能まで実装済み |
-| 2 ユーザー登録・PFC算出 | ⬜ 未着手 | 次の候補 |
-| 3 SHOKUJI (GPT-4o) | 🟡 ルート雛形のみ | `app/api/analyze-meal/route.ts` は雛形。画面は未実装（ナビは ComingSoon） |
+| 2 ユーザー登録・PFC算出 | ⬜ 未着手 | 目標PFCは当面デモ profile 既定値（2200/160/60/250）を使用 |
+| 3 SHOKUJI (GPT-4o) | ✅ 完了 | 画面・画像正規化・解析→編集→確定・日次3回制限（サーバー側）まで実装。下記 9.7 |
 | 4 PWA仕上げ・README | ⬜ 一部のみ | manifest 済 |
 
 ### 9.2 NOTE 画面の追加実装（仕様 §3.2 を超える部分）
@@ -254,6 +254,47 @@ const EXERCISE_LIBRARY_SEED = {
 
 ### 9.6 次の一手の候補
 
-1. フェーズ2（ユーザー登録・初期PFC算出）
-2. フェーズ3（SHOKUJI 画面 + GPT-4o 連携。ルート雛形は用意済み）
+1. フェーズ2（ユーザー登録・初期PFC算出。SHOKUJI の目標値は profiles から読むので、AI算出値を保存すれば自動で反映される）
+2. SHOKUJI 仕上げ（画像の Supabase Storage 保存・日付切替で過去の食事閲覧・週/月集計）
 3. NOTE 仕上げ（前回実績プリセットの精度、スーパーセットの並び替え等）
+
+### 9.7 SHOKUJI 画面の実装（フェーズ3、仕様 §3.3 / §4）
+
+- **画面本体**: `components/screens/meal/MealScreen.tsx`。ナビの ComingSoon を置換。
+  - PFCダッシュボード（CALORIES + P/F/C プログレスバー、`Bar` はローカル実装）。目標値は `MealRepo.getTarget()`（supabase=profiles / local=`lib/theme.ts` の `TARGET` 既定）。
+  - 当日食事タイムライン（料理名・PFC・サムネイル・AIバッジ・削除）。空状態の表示あり。
+  - 「SNAP YOUR MEAL」→ 取得元シート（写真を撮る= `capture="environment"` / アルバム= `capture` 無し）。シート/確定フォームは `FramePortal` 経由でフレーム直下に portal。
+- **画像正規化**: `lib/image.ts` の `processImage`（`createImageBitmap` → canvas で最大1024px → JPEG base64）。プロトタイプの処理をそのまま移植。
+- **解析→編集→確定**: 正規化画像を `/api/analyze-meal` に POST → `{dish,kcal,p,f,c}` を下書きにプリセット → ユーザーが手修正して確定。解析失敗・上限到達時は画像を添えて手入力フォームへフォールバック（記録は継続可）。「手入力で追加」から最初から手入力のみでも登録可。
+- **データ層**: `MealRepo`（`lib/db/meal-types.ts`）を NOTE と同じく local / supabase の両実装で用意（`local-meal-repo.ts` / `supabase-meal-repo.ts`、`getMealRepo()` でフォールバック切替）。`meals` テーブルに永続化。
+- **無料プラン 1日3回制限**:
+  - **判定の正本はサーバー側**。`app/api/analyze-meal/route.ts` が Supabase 構成時に `ai_usage` を読み、`DAILY_AI_LIMIT`(=3) 到達なら 429 を返し、成功時に count を +1（upsert）する。リクエストに `date`（クライアントのローカル日）を含めて当日基準で判定。
+  - **表示**: ヘッダーの「FREE PLAN 残/3」バッジ。`lib/meal-usage.tsx`（`MealUsageProvider` / `useMealUsage`）で AppShell ヘッダーと MealScreen が残回数を共有。
+  - **local モード**（Supabase env 未設定）はサーバーで永続化できないため、`MealRepo.incrementUsage` が localStorage に表示用カウントを保持（supabase 実装は no-op）。
+- **マイグレーション**: `0006_meals.sql`（`meals` / `ai_usage` テーブルと RLS デモポリシー）。
+- **注意点**: サムネイルは現状 data URL を直接保存（local も supabase も `meals.image_path` に格納）。画像の Supabase Storage 保存はフェーズ4で対応予定。`route.ts` は `getServerSupabase`（cookies 参照）を使うためビルドで動的(ƒ)ルートになる。
+
+---
+
+## 10. 将来のリリース構想・運用メモ
+
+> 当面はポートフォリオ用だが、**将来的には一般公開（リリース）したい**意向あり。
+> その段階で必要になる検討事項を記録しておく（実装は未着手）。
+
+### 10.1 リリース時にやること（チェックリスト）
+
+- [ ] **本格認証**（フェーズ2）: 現状は固定デモユーザー。Supabase Auth で本人ごとの RLS（`auth.uid()`）に差し替える。
+- [ ] **Supabase 本番接続**: 全ユーザーのデータをクラウド保存（現状 env 未設定だと localStorage で端末内のみ）。
+- [ ] **画像の Supabase Storage 保存**（フェーズ4）: 現状サムネイルは data URL を直接 DB 保存しているため、Storage + 署名URL に移行して通信量・DB肥大を抑える。
+- [ ] **APIキーの保護**: クライアントに出さずサーバールート経由（現状の設計を維持）。本番は Vercel の環境変数に `OPENAI_API_KEY` を登録。
+- [ ] **コスト暴走対策**: OpenAI Billing の Usage limits で月額上限を設定。AI解析の日次制限（現 1日3回・サーバー側強制）を維持/調整。
+- [ ] **OpenAI 利用ポリシー順守**: エンドユーザー提供時の表記・データ取り扱いを確認。
+- [ ] **課金区分**: 個人公開のうちは OpenAI「自分用」でよい。法人化・事業売上計上・インボイスが必要になったら「ビジネス用」へ切替（機能・料金は同じ、請求まわりのみ差異）。
+- [ ] **PWA 仕上げ**（フェーズ4）: ホーム画面追加・全画面起動・アイコン整備。
+- [ ] **収益化**（任意）: DATA 画面のプレミアム解放（月額¥580想定）を実装する場合は決済（Stripe 等）を追加。
+
+### 10.2 OpenAI 課金の運用方針（決定事項）
+
+- **自動充電（Auto-recharge）はオフ**で運用する。残高分で打ち止めになり、想定外請求・キー漏洩時の被害を防げる。
+  - 写真1枚あたり概ね1円未満のため、少額（$5 程度）チャージで当面足りる。
+  - 不特定多数が常時利用する本番規模になり「デモ中に止まると困る」段階で初めて自動充電オンを検討する（最低 $10 単位）。
