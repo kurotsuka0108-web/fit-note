@@ -48,6 +48,8 @@ export interface MealRepo {
   getMeals(date: string): Promise<Meal[]>;
   /** 当日履歴に1食追加して、作成した Meal を返す */
   addMeal(date: string, meal: NewMeal): Promise<Meal>;
+  /** 既存の食事を上書き更新して、更新後の Meal を返す */
+  updateMeal(id: string, meal: NewMeal): Promise<Meal>;
   /** 食事を1件削除 */
   removeMeal(id: string): Promise<void>;
 

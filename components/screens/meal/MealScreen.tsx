@@ -10,8 +10,9 @@ import { useMealUsage } from "@/lib/meal-usage";
 import { getMealRepo, type Meal, type MealSource, type NewMeal, type TargetPFC } from "@/lib/db";
 import { FramePortal } from "@/components/screens/note/FramePortal";
 
-// 解析中フォームの下書き（確定前の編集対象）。
+// 確定前/編集中の下書き。id があれば既存編集、null なら新規。
 type Draft = {
+  id: string | null;
   dish: string;
   kcal: number;
   p: number;
@@ -20,16 +21,17 @@ type Draft = {
   image: string | null;
   source: MealSource;
   failed: boolean; // 解析失敗→手入力に切替えたか
+  note: string; // AI の根拠メモ（表示用。永続化しない）
 };
 
-type AnalyzeResult = { dish: string; kcal: number; p: number; f: number; c: number };
+type AnalyzeResult = { dish: string; kcal: number; p: number; f: number; c: number; source?: string; note?: string };
 
 // 自前のサーバールート（route.ts）を呼ぶ。APIキーはサーバー側に隠れる（仕様 §4）。
-async function analyzeMeal(processed: ProcessedImage, date: string): Promise<AnalyzeResult> {
+async function analyzeMeal(processed: ProcessedImage, date: string, hint: string): Promise<AnalyzeResult> {
   const r = await fetch("/api/analyze-meal", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ imageBase64: processed.base64, mediaType: "image/jpeg", date }),
+    body: JSON.stringify({ imageBase64: processed.base64, mediaType: "image/jpeg", date, hint }),
   });
   const data = await r.json();
   if (!r.ok) throw new Error(data?.error || `APIエラー (${r.status})`);
@@ -46,6 +48,7 @@ export function MealScreen() {
   const [target, setTarget] = useState<TargetPFC>({ kcal: 2200, p: 160, f: 60, c: 250 });
   const [status, setStatus] = useState<"idle" | "analyzing" | "error">("idle");
   const [errMsg, setErrMsg] = useState("");
+  const [hint, setHint] = useState(""); // ブランド商品の照合精度を上げるユーザーヒント
   const [draft, setDraft] = useState<Draft | null>(null);
   const [picker, setPicker] = useState(false);
   const cameraRef = useRef<HTMLInputElement>(null); // カメラ直起動
@@ -83,13 +86,14 @@ export function MealScreen() {
       const processed = await processImage(file); // createImageBitmap で正規化
       dataUrl = processed.dataUrl;
 
-      const result = await analyzeMeal(processed, today);
+      const result = await analyzeMeal(processed, today, hint.trim());
 
       // 解析成功 → 利用回数を加算（local のみ。supabase はサーバーが加算済み）して同期
       await repo.incrementUsage(today);
       await refreshUsage();
 
       setDraft({
+        id: null,
         dish: result.dish || "解析した食事",
         kcal: Number(result.kcal) || 0,
         p: Number(result.p) || 0,
@@ -98,7 +102,9 @@ export function MealScreen() {
         image: dataUrl,
         source: "ai",
         failed: false,
+        note: result.note ?? "",
       });
+      setHint(""); // 使い終わったヒントはクリア
       setStatus("idle");
     } catch (err) {
       // 失敗しても（画像があれば添えて）手入力フォームに切り替えて記録は続けられる
@@ -106,13 +112,17 @@ export function MealScreen() {
       setErrMsg(msg);
       setStatus("error");
       await refreshUsage(); // 上限到達などサーバー側の状態を反映
-      setDraft({ dish: "", kcal: 0, p: 0, f: 0, c: 0, image: dataUrl, source: "manual", failed: true });
+      setDraft({ id: null, dish: hint.trim(), kcal: 0, p: 0, f: 0, c: 0, image: dataUrl, source: "manual", failed: true, note: "" });
       setTimeout(() => setStatus("idle"), 4000);
     }
   };
 
   const manual = () =>
-    setDraft({ dish: "", kcal: 0, p: 0, f: 0, c: 0, image: null, source: "manual", failed: false });
+    setDraft({ id: null, dish: "", kcal: 0, p: 0, f: 0, c: 0, image: null, source: "manual", failed: false, note: "" });
+
+  // 既存の食事をタップ → 編集（値をプリセット）
+  const openEdit = (m: Meal) =>
+    setDraft({ id: m.id, dish: m.dish, kcal: m.kcal, p: m.p, f: m.f, c: m.c, image: m.image, source: m.source, failed: false, note: "" });
 
   const save = async () => {
     if (!draft) return;
@@ -126,8 +136,13 @@ export function MealScreen() {
       source: draft.source,
     };
     try {
-      const created = await repo.addMeal(today, payload);
-      setMeals((m) => [created, ...m]);
+      if (draft.id) {
+        const updated = await repo.updateMeal(draft.id, payload);
+        setMeals((m) => m.map((x) => (x.id === updated.id ? updated : x)));
+      } else {
+        const created = await repo.addMeal(today, payload);
+        setMeals((m) => [created, ...m]);
+      }
       setDraft(null);
     } catch (e) {
       console.error("[MealScreen]", e);
@@ -172,6 +187,15 @@ export function MealScreen() {
         </div>
       </div>
 
+      {/* ヒント入力（ブランド商品の照合精度を上げる） */}
+      <input
+        value={hint}
+        onChange={(e) => setHint(e.target.value)}
+        placeholder="ヒント（任意）: 例 吉野家 牛丼 大盛り / ファミマ サラダチキン"
+        className="w-full rounded-xl px-3 mb-2"
+        style={{ minHeight: 44, background: C.surface, color: C.hi, fontSize: 13, border: `1px solid ${C.border}`, outline: "none" }}
+      />
+
       {/* SNAP YOUR MEAL（マルチモーダル導線） */}
       <button
         onClick={openPicker}
@@ -188,14 +212,14 @@ export function MealScreen() {
         {status === "analyzing" ? (
           <>
             <Loader2 size={34} color={C.accent} className="fn-spin" />
-            <span style={{ color: C.mid, fontSize: 13, marginTop: 10 }}>AIが解析中…</span>
+            <span style={{ color: C.mid, fontSize: 13, marginTop: 10 }}>AIが解析中…（商品を照合しています）</span>
           </>
         ) : (
           <>
             <Camera size={34} color={remaining > 0 ? C.accent : C.lo} />
             <span style={{ color: C.hi, fontSize: 16, fontWeight: 800, letterSpacing: 2, marginTop: 8 }}>SNAP YOUR MEAL</span>
             <span style={{ color: C.mid, fontSize: 11, marginTop: 4, textAlign: "center" }}>
-              {remaining > 0 ? "撮影またはアルバムからAIがPFCに構造化" : "本日の無料解析を使い切りました"}
+              {remaining > 0 ? "撮影/アルバムから。コンビニ・外食商品は公式値を照合" : "本日の無料解析を使い切りました"}
             </span>
           </>
         )}
@@ -216,7 +240,7 @@ export function MealScreen() {
         </button>
       </div>
 
-      {/* 当日食事タイムライン */}
+      {/* 当日食事タイムライン（タップで編集） */}
       {meals.length === 0 ? (
         <div className="rounded-xl p-6 text-center" style={{ background: C.surface, border: `1px solid ${C.border}` }}>
           <Utensils size={22} color={C.lo} style={{ margin: "0 auto 8px" }} />
@@ -228,8 +252,9 @@ export function MealScreen() {
           {meals.map((m) => (
             <div
               key={m.id}
+              onClick={() => openEdit(m)}
               className="rounded-xl p-3 flex items-center gap-3"
-              style={{ background: C.surface, border: `1px solid ${C.border}` }}
+              style={{ background: C.surface, border: `1px solid ${C.border}`, cursor: "pointer" }}
             >
               <div
                 className="rounded-lg flex items-center justify-center overflow-hidden flex-shrink-0"
@@ -254,7 +279,14 @@ export function MealScreen() {
               <span style={{ color: C.accent, fontSize: 14, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>
                 {m.kcal} <span style={{ color: C.mid, fontSize: 10, fontWeight: 500 }}>kcal</span>
               </span>
-              <button onClick={() => remove(m.id)} aria-label="削除" style={{ color: C.lo, flexShrink: 0 }}>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  remove(m.id);
+                }}
+                aria-label="削除"
+                style={{ color: C.lo, flexShrink: 0 }}
+              >
                 <Trash2 size={16} />
               </button>
             </div>
@@ -324,7 +356,7 @@ function Bar({ value, target, color }: { value: number; target: number; color: s
   );
 }
 
-// AI 結果プリセット → 手修正 → 確定（仕様 §3.3）。手入力のみでも登録可。
+// AI 結果プリセット → 手修正 → 確定（仕様 §3.3）。既存編集・手入力のみの登録も兼ねる。
 function DraftSheet({
   draft,
   setDraft,
@@ -339,6 +371,7 @@ function DraftSheet({
   errMsg: string;
 }) {
   const C = useC();
+  const isEdit = draft.id !== null;
   const fields: [keyof Draft, string, string][] = [
     ["kcal", "カロリー", "kcal"],
     ["p", "タンパク質", "g"],
@@ -354,7 +387,7 @@ function DraftSheet({
       <div className="absolute inset-0 flex items-end" style={{ background: C.scrim, zIndex: 50 }}>
         <div className="w-full rounded-t-3xl p-5" style={{ background: C.bg, border: `1px solid ${C.border}` }}>
           <div className="flex items-center justify-between mb-1">
-            <h3 style={{ color: C.hi, fontSize: 16, fontWeight: 800 }}>記録を確定</h3>
+            <h3 style={{ color: C.hi, fontSize: 16, fontWeight: 800 }}>{isEdit ? "記録を編集" : "記録を確定"}</h3>
             <button onClick={onCancel} aria-label="閉じる" style={{ color: C.mid }}>
               <X size={20} />
             </button>
@@ -362,9 +395,11 @@ function DraftSheet({
           <p style={{ color: draft.failed ? "#fb7185" : draft.source === "ai" ? C.accent : C.mid, fontSize: 11 }} className="mb-2">
             {draft.failed
               ? "AIが画像を読み取れませんでした。手入力で記録してください。"
-              : draft.source === "ai"
-                ? "AIの推定値です。間違っていれば修正して確定できます。"
-                : "数値を入力して記録します。"}
+              : isEdit
+                ? "数値を修正して保存できます。"
+                : draft.source === "ai"
+                  ? `AIの推定値です。間違っていれば修正して確定できます。${draft.note ? `（${draft.note}）` : ""}`
+                  : "数値を入力して記録します。"}
           </p>
           {draft.failed && errMsg && (
             <p
@@ -410,7 +445,7 @@ function DraftSheet({
             className="w-full rounded-xl flex items-center justify-center gap-2"
             style={{ minHeight: 54, background: C.accent, color: ON_GOLD, fontWeight: 800, fontSize: 16 }}
           >
-            <Check size={18} /> この内容で記録
+            <Check size={18} /> {isEdit ? "変更を保存" : "この内容で記録"}
           </button>
         </div>
       </div>

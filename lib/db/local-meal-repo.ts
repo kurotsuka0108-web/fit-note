@@ -49,6 +49,15 @@ export class LocalMealRepo implements MealRepo {
     return created;
   }
 
+  async updateMeal(id: string, meal: NewMeal): Promise<Meal> {
+    const store = load();
+    const idx = store.meals.findIndex((m) => m.id === id);
+    if (idx < 0) throw new Error("食事が見つかりません");
+    store.meals[idx] = { ...store.meals[idx], ...meal };
+    save(store);
+    return store.meals[idx];
+  }
+
   async removeMeal(id: string): Promise<void> {
     const store = load();
     store.meals = store.meals.filter((m) => m.id !== id);

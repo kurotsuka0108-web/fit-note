@@ -266,6 +266,9 @@ const EXERCISE_LIBRARY_SEED = {
   - 「SNAP YOUR MEAL」→ 取得元シート（写真を撮る= `capture="environment"` / アルバム= `capture` 無し）。シート/確定フォームは `FramePortal` 経由でフレーム直下に portal。
 - **画像正規化**: `lib/image.ts` の `processImage`（`createImageBitmap` → canvas で最大1024px → JPEG base64）。プロトタイプの処理をそのまま移植。
 - **解析→編集→確定**: 正規化画像を `/api/analyze-meal` に POST → `{dish,kcal,p,f,c}` を下書きにプリセット → ユーザーが手修正して確定。解析失敗・上限到達時は画像を添えて手入力フォームへフォールバック（記録は継続可）。「手入力で追加」から最初から手入力のみでも登録可。
+- **ヒント入力**: SNAP ボタン上の任意テキスト欄（例「吉野家 牛丼 大盛り」）。解析時に `hint` としてルートへ送り、ブランド商品の特定・分量精度を上げる。
+- **記録の編集**: タイムラインの食事をタップすると確定フォームが編集モードで開き、`MealRepo.updateMeal` で上書き保存できる（削除はゴミ箱アイコン）。
+- **精度向上（route.ts）**: OpenAI **Responses API** + **`web_search` ツール**でチェーン店・コンビニ・メーカー商品の公式栄養値を照合。画像は `detail:"high"`、`temperature:0.2`、強化システムプロンプト（複数品目の合算・分量見積り・ヒント最優先）。出力 JSON は本文から頑健に抽出。`OPENAI_WEB_SEARCH=0` で検索無効化、検索経由で失敗した場合は検索なしで自動リトライ。
 - **データ層**: `MealRepo`（`lib/db/meal-types.ts`）を NOTE と同じく local / supabase の両実装で用意（`local-meal-repo.ts` / `supabase-meal-repo.ts`、`getMealRepo()` でフォールバック切替）。`meals` テーブルに永続化。
 - **無料プラン 1日3回制限**:
   - **判定の正本はサーバー側**。`app/api/analyze-meal/route.ts` が Supabase 構成時に `ai_usage` を読み、`DAILY_AI_LIMIT`(=3) 到達なら 429 を返し、成功時に count を +1（upsert）する。リクエストに `date`（クライアントのローカル日）を含めて当日基準で判定。
