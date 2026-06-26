@@ -68,6 +68,25 @@ export class SupabaseMealRepo implements MealRepo {
     return toMeal(data as unknown as MealRow);
   }
 
+  async updateMeal(id: string, meal: NewMeal): Promise<Meal> {
+    const { data, error } = await this.sb
+      .from("meals")
+      .update({
+        dish: meal.dish,
+        kcal: meal.kcal,
+        p: meal.p,
+        f: meal.f,
+        c: meal.c,
+        image_path: meal.image,
+        source: meal.source,
+      })
+      .eq("id", id)
+      .select(MEAL_SELECT)
+      .single();
+    if (error) throw error;
+    return toMeal(data as unknown as MealRow);
+  }
+
   async removeMeal(id: string): Promise<void> {
     const { error } = await this.sb.from("meals").delete().eq("id", id);
     if (error) throw error;
