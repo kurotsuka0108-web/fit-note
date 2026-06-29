@@ -27,6 +27,21 @@ npm run dev                        # http://localhost:3000
 |---|---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` | データ永続化 | localStorage に保存 |
 | `OPENAI_API_KEY` | 食事写真の AI 解析（フェーズ3） | 解析APIは 500 を返す |
+| `OPENAI_WEB_SEARCH` | ブランド商品の公式栄養値を Web 検索で照合（`0` で無効） | `1`（有効） |
+
+## Supabase 本番接続（クラウド保存）
+
+未設定でも localStorage で動くが、端末間同期・AI解析の日次3回制限のサーバー強制を
+有効にするには Supabase を接続する。
+
+1. **プロジェクト作成** — [supabase.com](https://supabase.com) で New project（Region は Tokyo 推奨、DB パスワードは控える）。
+2. **スキーマ適用** — ダッシュボードの **SQL Editor → New query** に [`supabase/setup.sql`](supabase/setup.sql) の全文を貼り付けて **Run**（0001〜0006 を1つにまとめた冪等SQL。`drop policy` を含むため「破壊的操作」警告が出るが、空DBなので実行してよい）。`Table Editor` に `profiles / exercises / workout_logs / workout_sets / meals / ai_usage` が並べば成功。
+3. **接続情報取得** — **Settings → API** で Project URL と `anon` `public` キーをコピー（`service_role` は使わない）。
+4. **環境変数設定** — ローカルは `.env.local`、本番は Vercel の Environment Variables に次を登録し再デプロイ:
+   - `NEXT_PUBLIC_SUPABASE_URL` = Project URL
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY` = anon public キー
+
+> 接続を切替えると保存先が変わるため、それまで localStorage に入れていたデータは引き継がれない。
 
 ## ディレクトリ構成
 
