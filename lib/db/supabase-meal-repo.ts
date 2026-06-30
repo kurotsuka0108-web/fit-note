@@ -1,10 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { DEMO_USER_ID } from "@/lib/env";
 import { TARGET } from "@/lib/theme";
 import { DAILY_AI_LIMIT, type AiUsage, type Meal, type MealRepo, type MealSource, type NewMeal, type TargetPFC } from "./meal-types";
 
 // Supabase 実装。migration 0006_meals.sql（meals・ai_usage）に対応。
-// RLS はデモユーザー(DEMO_USER_ID)に限定（NOTE と同じ。フェーズ2で auth.uid() に差し替え）。
+// RLS は auth.uid() ベース（フェーズ2）。user_id は default auth.uid() で自動補完。
 
 type MealRow = {
   id: string;
@@ -41,7 +40,6 @@ export class SupabaseMealRepo implements MealRepo {
     const { data, error } = await this.sb
       .from("meals")
       .select(MEAL_SELECT)
-      .eq("user_id", DEMO_USER_ID)
       .eq("date", date)
       .order("created_at", { ascending: false });
     if (error) throw error;
@@ -52,8 +50,7 @@ export class SupabaseMealRepo implements MealRepo {
     const { data, error } = await this.sb
       .from("meals")
       .insert({
-        user_id: DEMO_USER_ID,
-        date,
+        date, // user_id は default auth.uid()
         dish: meal.dish,
         kcal: meal.kcal,
         p: meal.p,
@@ -96,7 +93,7 @@ export class SupabaseMealRepo implements MealRepo {
     const { data, error } = await this.sb
       .from("profiles")
       .select("target_kcal,target_p,target_f,target_c")
-      .eq("id", DEMO_USER_ID)
+      // RLS が本人の profiles 行のみ返すため id フィルタは不要。
       .maybeSingle();
     if (error) throw error;
     if (!data) return { ...TARGET };
@@ -112,7 +109,6 @@ export class SupabaseMealRepo implements MealRepo {
     const { data, error } = await this.sb
       .from("ai_usage")
       .select("count")
-      .eq("user_id", DEMO_USER_ID)
       .eq("date", date)
       .maybeSingle();
     if (error) throw error;

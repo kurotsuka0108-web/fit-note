@@ -43,6 +43,18 @@ npm run dev                        # http://localhost:3000
 
 > 接続を切替えると保存先が変わるため、それまで localStorage に入れていたデータは引き継がれない。
 
+### 認証（フェーズ2）
+
+ログインした本人ごとにデータを分離する（RLS は `auth.uid()` ベース）。Supabase 構成時はログイン必須、未構成のローカルはログイン不要。
+
+1. **スキーマ更新** — 既存DBには `supabase/migrations/0007_auth.sql` を SQL Editor で実行（新規DBは `setup.sql` に同梱済み）。RLS を `auth.uid()` に切替え、`user_id` 列へ `default auth.uid()` を付与、新規ユーザーに profiles 行を自動生成するトリガを作成する。
+2. **プロバイダ有効化** — Supabase の **Authentication → Sign In / Providers** で:
+   - **Email**（メール＋パスワード）。デモを滑らかにするなら "Confirm email" を OFF 推奨。
+   - **Anonymous sign-ins**（「ゲストとして始める」ワンクリック用）。
+3. ログイン方法は「ゲストとして始める（匿名）」とメール＋パスワードの2種類。ヘッダーのログアウトでサインアウト。
+
+> RLS 切替後、旧「デモユーザー」所有の既存データは新しいログインユーザーからは見えなくなる（各自のアカウントで新規に記録する）。
+
 ## ディレクトリ構成
 
 ```

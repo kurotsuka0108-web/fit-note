@@ -198,7 +198,7 @@ const EXERCISE_LIBRARY_SEED = {
 |---|---|---|
 | 0 環境構築 | ✅ 完了 | Next.js 16 + TS + Tailwind v4 + next-themes + PWA manifest |
 | 1 NOTE (CRUD) | ✅ 完了 + 拡張 | 下記 9.2 の追加機能まで実装済み |
-| 2 ユーザー登録・PFC算出 | ⬜ 未着手 | 目標PFCは当面デモ profile 既定値（2200/160/60/250）を使用 |
+| 2 ユーザー登録・PFC算出 | 🟡 認証のみ完了 | Supabase Auth（匿名＋メール）導入・RLSを auth.uid() に全面切替（下記 9.8）。AI目標PFC算出は未着手 |
 | 3 SHOKUJI (GPT-4o) | ✅ 完了 | 画面・画像正規化・解析→編集→確定・日次3回制限（サーバー側）まで実装。下記 9.7 |
 | 4 PWA仕上げ・README | ⬜ 一部のみ | manifest 済 |
 
@@ -301,3 +301,15 @@ const EXERCISE_LIBRARY_SEED = {
 - **自動充電（Auto-recharge）はオフ**で運用する。残高分で打ち止めになり、想定外請求・キー漏洩時の被害を防げる。
   - 写真1枚あたり概ね1円未満のため、少額（$5 程度）チャージで当面足りる。
   - 不特定多数が常時利用する本番規模になり「デモ中に止まると困る」段階で初めて自動充電オンを検討する（最低 $10 単位）。
+
+### 9.8 認証の実装（フェーズ2前半、仕様 §3 / §5）
+
+- **方式**: Supabase Auth。ログインは2種類 —「ゲストとして始める」（匿名サインイン＝ワンクリック。採用担当が即操作できる PRD 要件）と、メール＋パスワード。
+- **状態管理**: `lib/auth.tsx`（`AuthProvider` / `useAuth`）。`app/providers.tsx` で全体をラップ。Supabase 未構成（local モード）は `authed=true` で素通し、構成時のみログイン必須。
+- **画面**: `components/screens/AuthScreen.tsx`（ログイン/新規登録）。`components/AppShell.tsx` が `useAuth()` でゲートし、未ログインは AuthScreen、ログイン後はタブUI。ヘッダーにログアウト。
+- **セッション維持**: Next.js 16 の **`proxy.ts`**（旧 middleware。`@supabase/ssr` のトークンを毎リクエスト更新）。
+- **RLS**: `0007_auth.sql` で全テーブルのポリシーを `auth.uid()` ベースへ差し替え、`user_id` 列に `default auth.uid()` を付与。これにより各リポジトリは `user_id` を明示しなくなり（挿入は default、参照は RLS が自動で本人に絞る）、`DEMO_USER_ID` 依存をコードから除去した。新規ユーザー作成時に profiles 行を作るトリガ `handle_new_user` も追加。
+- **サーバールート**: `app/api/analyze-meal/route.ts` は `auth.getUser()` で本人を特定し、`ai_usage` を本人IDで判定・加算（未ログインは 401）。
+- **要ダッシュボード設定**: Authentication で **Email**（"Confirm email" OFF 推奨）と **Anonymous sign-ins** を有効化。既存DBには `0007_auth.sql` の実行が必要。
+- **注意**: RLS 切替後、旧デモユーザー所有の既存データは新ユーザーから不可視（各自のアカウントで新規記録）。
+- **残タスク（フェーズ2後半）**: 身体情報入力 → AIが目標PFCを算出して profiles に保存（現状は既定値 2200/160/60/250。SHOKUJI ダッシュボードは profiles を読むので、保存すれば自動反映）。
