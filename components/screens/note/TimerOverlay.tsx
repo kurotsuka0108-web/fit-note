@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, Minus, Pause, Play, Plus, X } from "lucide-react";
 import { useC } from "@/lib/use-tokens";
 import { ON_GOLD } from "@/lib/theme";
+import { useSettings } from "@/lib/settings";
 import { FramePortal } from "./FramePortal";
 
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.max(0, s) % 60).padStart(2, "0")}`;
@@ -26,6 +27,7 @@ export function TimerOverlay({
   onCancel: () => void;
 }) {
   const C = useC();
+  const { vibration } = useSettings();
   const [total, setTotal] = useState(Math.max(1, seconds));
   const [left, setLeft] = useState(Math.max(1, seconds));
   const [running, setRunning] = useState(true);
@@ -47,7 +49,7 @@ export function TimerOverlay({
   // 0 到達で完了（副作用は更新関数の外で1度だけ）。
   useEffect(() => {
     if (left > 0 || done.current) return;
-    if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate([120, 60, 120]);
+    if (vibration && typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate([120, 60, 120]);
     finish(total);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [left]);

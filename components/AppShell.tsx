@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useTheme } from "next-themes";
-import { BarChart3, Dumbbell, Loader2, LogOut, Moon, Signal, Sun, Utensils } from "lucide-react";
+import { useState } from "react";
+import { BarChart3, Dumbbell, Loader2, Settings, Signal, Utensils } from "lucide-react";
 import { useC } from "@/lib/use-tokens";
 import { ON_GOLD } from "@/lib/theme";
 import { MealUsageProvider, useMealUsage } from "@/lib/meal-usage";
 import { useAuth } from "@/lib/auth";
+import { SettingsSheet } from "@/components/SettingsSheet";
 import { DataScreen } from "@/components/screens/DataScreen";
 import { NoteScreen } from "@/components/screens/note/NoteScreen";
 import { MealScreen } from "@/components/screens/meal/MealScreen";
@@ -91,37 +91,29 @@ function Centered({ children }: { children: React.ReactNode }) {
   );
 }
 
-// ヘッダー（ロゴ・テーマ切替・任意の右要素）。右要素は SHOKUJI バッジ等に使う。
+// ヘッダー（ロゴ・任意の右要素・設定）。右要素は SHOKUJI バッジ等に使う。
+// テーマ切替・ログアウトは設定（歯車）に集約した。
 function Header({ right }: { right?: React.ReactNode }) {
   const C = useC();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   return (
     <div className="flex items-center justify-between px-5 py-3" style={{ flexShrink: 0, borderBottom: `1px solid ${C.border}` }}>
       <h1 style={{ color: C.hi, fontSize: 20, fontWeight: 900, letterSpacing: 0.5 }}>
         FIT<span style={{ color: C.accent }}>·</span>NOTE
       </h1>
       <div className="flex items-center gap-2">
-        <ThemeToggle />
         {right}
+        <button
+          onClick={() => setSettingsOpen(true)}
+          aria-label="設定"
+          className="rounded-full flex items-center justify-center"
+          style={{ width: 34, height: 34, background: C.surface, color: C.mid, border: `1px solid ${C.border}` }}
+        >
+          <Settings size={16} />
+        </button>
       </div>
+      {settingsOpen && <SettingsSheet onClose={() => setSettingsOpen(false)} />}
     </div>
-  );
-}
-
-function ThemeToggle() {
-  const C = useC();
-  const { resolvedTheme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  const isDark = !mounted || resolvedTheme !== "light";
-  return (
-    <button
-      onClick={() => setTheme(isDark ? "light" : "dark")}
-      aria-label="テーマを切り替える"
-      className="rounded-full flex items-center justify-center"
-      style={{ width: 34, height: 34, background: C.surface, color: C.accent, border: `1px solid ${C.border}` }}
-    >
-      {isDark ? <Moon size={16} /> : <Sun size={16} />}
-    </button>
   );
 }
 
@@ -130,36 +122,23 @@ function AppBody() {
   const C = useC();
   const [tab, setTab] = useState<Tab>("note");
   const { usage, remaining } = useMealUsage();
-  const { supabase, signOut } = useAuth();
 
   const header = HEADER[tab];
   // SHOKUJI タブのバッジは「FREE PLAN 残/3」を動的表示（仕様 §3.1 / §3.3）
   const badgeText = tab === "meal" && usage.ready ? `FREE PLAN ${remaining}/${usage.limit}` : header.right;
 
   const right = (
-    <>
-      <span
-        className="rounded-full px-3 py-1"
-        style={{
-          fontSize: 11, fontWeight: 800, letterSpacing: 1,
-          background: header.solid ? C.accent : "transparent",
-          color: header.solid ? ON_GOLD : C.mid,
-          border: header.solid ? "none" : `1px solid ${C.border}`,
-        }}
-      >
-        {badgeText}
-      </span>
-      {supabase && (
-        <button
-          onClick={() => signOut()}
-          aria-label="ログアウト"
-          className="rounded-full flex items-center justify-center"
-          style={{ width: 34, height: 34, background: C.surface, color: C.mid, border: `1px solid ${C.border}` }}
-        >
-          <LogOut size={15} />
-        </button>
-      )}
-    </>
+    <span
+      className="rounded-full px-3 py-1"
+      style={{
+        fontSize: 11, fontWeight: 800, letterSpacing: 1,
+        background: header.solid ? C.accent : "transparent",
+        color: header.solid ? ON_GOLD : C.mid,
+        border: header.solid ? "none" : `1px solid ${C.border}`,
+      }}
+    >
+      {badgeText}
+    </span>
   );
 
   return (

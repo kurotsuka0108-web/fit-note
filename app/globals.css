@@ -68,6 +68,24 @@ button {
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
+  cursor: pointer;
+  /* 押し心地（P1）: 背景/文字はインラインstyle側で色が変わるため、
+     ここでは色・transform・filter にトランジションを掛けて滑らかにする。 */
+  transition: transform 0.12s ease, filter 0.2s ease, opacity 0.2s ease,
+    background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+/* ホバー可能なデバイス（マウス）だけ明るく。インライン背景色でも効くよう filter を使う。 */
+@media (hover: hover) {
+  button:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+}
+/* 押下で軽く沈む（タップ/クリックの即時フィードバック） */
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+button:disabled {
+  cursor: not-allowed;
 }
 
 /* フォーカスリング（アクセシビリティ） */

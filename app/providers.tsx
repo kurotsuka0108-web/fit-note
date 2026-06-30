@@ -2,6 +2,7 @@
 
 import { ThemeProvider } from "next-themes";
 import { AuthProvider } from "@/lib/auth";
+import { SettingsProvider } from "@/lib/settings";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 
 /**
@@ -19,7 +20,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
       enableSystem
       themes={["dark", "light"]}
     >
-      <AuthProvider>{children}</AuthProvider>
+      <AuthProvider>
+        <SettingsProvider>{children}</SettingsProvider>
+      </AuthProvider>
       <ServiceWorkerRegister />
     </ThemeProvider>
   );

@@ -15,6 +15,7 @@ import {
   type WorkoutLog,
   type WorkoutSet,
 } from "@/lib/db";
+import { useSettings } from "@/lib/settings";
 import { ExerciseCard } from "./ExerciseCard";
 import { AddExerciseSheet } from "./AddExerciseSheet";
 import { SetEditor } from "./SetEditor";
@@ -98,6 +99,7 @@ export function NoteScreen() {
   const [err, setErr] = useState("");
   const [timer, setTimer] = useState<TimerState | null>(null);
   const timerSeq = useRef(0);
+  const { autoIntervalTimer } = useSettings();
 
   // 追加直後にその種目カードへスクロールするための参照と対象ID（ref で管理し state 更新を避ける）
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -191,7 +193,8 @@ export function NoteScreen() {
   // セット記録後のインターバル（休憩）タイマー。intervalSec<=0 なら出さない。
   // afterDone は完了時（自然完了/スキップ）に呼ぶ追加処理（例: スーパーセット先頭へ戻る）。
   const startRest = (log: WorkoutLog, afterDone?: () => void) => {
-    if (log.intervalSec <= 0) { setTimer(null); afterDone?.(); return; }
+    // 設定で自動インターバルが OFF、または休憩秒が0以下なら表示しない。
+    if (!autoIntervalTimer || log.intervalSec <= 0) { setTimer(null); afterDone?.(); return; }
     openTimer({
       seconds: log.intervalSec, title: "インターバル", subtitle: "休憩", kind: "rest",
       onDone: () => { setTimer(null); afterDone?.(); }, onCancel: () => setTimer(null),
