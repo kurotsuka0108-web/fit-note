@@ -20,13 +20,18 @@ export function ServiceWorkerRegister() {
       return;
     }
 
-    const onLoad = () => {
+    const register = () => {
       navigator.serviceWorker
         .register("/sw.js", { scope: "/", updateViaCache: "none" })
         .catch((err) => console.error("SW registration failed:", err));
     };
-    window.addEventListener("load", onLoad);
-    return () => window.removeEventListener("load", onLoad);
+    // すでに load 済みなら即登録（useEffect 時点で load が終わっていることが多い）
+    if (document.readyState === "complete") {
+      register();
+      return;
+    }
+    window.addEventListener("load", register);
+    return () => window.removeEventListener("load", register);
   }, []);
 
   return null;
