@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BarChart3, Dumbbell, Loader2, Settings, Signal, Utensils } from "lucide-react";
 import { useC } from "@/lib/use-tokens";
 import { ON_GOLD } from "@/lib/theme";
@@ -69,9 +69,9 @@ function Frame({ children }: { children: React.ReactNode }) {
           boxShadow: C.shadow, transition: "background .3s, border-color .3s",
         }}
       >
-        {/* status bar（装飾） */}
+        {/* status bar（時刻は実時間、5G は装飾） */}
         <div className="flex items-center justify-between px-6 pt-3 pb-1" style={{ flexShrink: 0 }}>
-          <span style={{ color: C.hi, fontSize: 13, fontWeight: 700 }}>9:41</span>
+          <StatusClock />
           <div className="flex items-center gap-1" style={{ color: C.hi }}>
             <Signal size={14} /><span style={{ fontSize: 11, fontWeight: 700 }}>5G</span>
           </div>
@@ -80,6 +80,22 @@ function Frame({ children }: { children: React.ReactNode }) {
       </div>
     </div>
   );
+}
+
+// ステータスバーの時刻（実時間 HH:MM）。SSR では空にしハイドレーション不一致を避ける。
+function StatusClock() {
+  const C = useC();
+  const [time, setTime] = useState("");
+  useEffect(() => {
+    const tick = () => {
+      const d = new Date();
+      setTime(`${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`);
+    };
+    tick();
+    const id = setInterval(tick, 15000);
+    return () => clearInterval(id);
+  }, []);
+  return <span style={{ color: C.hi, fontSize: 13, fontWeight: 700, minWidth: 36 }}>{time}</span>;
 }
 
 function Centered({ children }: { children: React.ReactNode }) {

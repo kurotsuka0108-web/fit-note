@@ -70,6 +70,31 @@ body {
   }
 }
 
+/* ボトムシートの登場（P4）: 下からスライドアップ＋背景フェード。 */
+.fn-sheet-in {
+  animation: fnSheetIn 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+@keyframes fnSheetIn {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+.fn-scrim-in {
+  animation: fnScrimIn 0.22s ease;
+}
+@keyframes fnScrimIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 /* スクロールバー非表示（端末風UI） */
 .fn-scroll::-webkit-scrollbar {
   width: 0;

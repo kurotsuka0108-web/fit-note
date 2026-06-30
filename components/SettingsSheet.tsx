@@ -89,9 +89,9 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
 
   return (
     <FramePortal>
-      <div className="absolute inset-0 flex items-end" style={{ background: C.scrim, zIndex: 40 }} onClick={onClose}>
+      <div className="absolute inset-0 flex items-end fn-scrim-in" style={{ background: C.scrim, zIndex: 40 }} onClick={onClose}>
         <div
-          className="w-full"
+          className="w-full fn-sheet-in"
           style={{
             background: C.bg,
             borderTopLeftRadius: 24,
