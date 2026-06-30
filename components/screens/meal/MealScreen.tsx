@@ -1,14 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Camera, Check, Images, Loader2, Pencil, Trash2, Utensils, X } from "lucide-react";
+import { Camera, Check, Images, Loader2, Pencil, SlidersHorizontal, Trash2, Utensils, X } from "lucide-react";
 import { useC } from "@/lib/use-tokens";
 import { ON_GOLD } from "@/lib/theme";
 import { todayYmd } from "@/lib/date";
 import { processImage, type ProcessedImage } from "@/lib/image";
 import { useMealUsage } from "@/lib/meal-usage";
-import { getMealRepo, type Meal, type MealSource, type NewMeal, type TargetPFC } from "@/lib/db";
+import { getMealRepo, type Meal, type MealSource, type NewMeal, type Profile, type TargetPFC } from "@/lib/db";
 import { FramePortal } from "@/components/screens/note/FramePortal";
+import { ProfileSheet } from "./ProfileSheet";
 
 // 確定前/編集中の下書き。id があれば既存編集、null なら新規。
 type Draft = {
@@ -51,15 +52,25 @@ export function MealScreen() {
   const [hint, setHint] = useState(""); // ブランド商品の照合精度を上げるユーザーヒント
   const [draft, setDraft] = useState<Draft | null>(null);
   const [picker, setPicker] = useState(false);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
   const cameraRef = useRef<HTMLInputElement>(null); // カメラ直起動
   const libraryRef = useRef<HTMLInputElement>(null); // アルバム/ファイル選択
 
-  // 初期ロード: 当日の食事・目標 PFC・利用状況
+  // 初期ロード: 当日の食事・目標 PFC・利用状況・プロフィール
   useEffect(() => {
     repo.getMeals(today).then(setMeals).catch((e) => console.error("[MealScreen]", e));
     repo.getTarget().then(setTarget).catch((e) => console.error("[MealScreen]", e));
+    repo.getProfile().then(setProfile).catch((e) => console.error("[MealScreen]", e));
     refreshUsage();
   }, [repo, today, refreshUsage]);
+
+  // プロフィール保存 → 目標PFCをダッシュボードへ即反映
+  const saveProfile = async (p: Profile) => {
+    await repo.saveProfile(p);
+    setProfile(p);
+    setTarget(p.target);
+  };
 
   const totals = useMemo(
     () =>
@@ -164,7 +175,15 @@ export function MealScreen() {
       {/* PFC ダッシュボード */}
       <div className="rounded-2xl p-4 mb-3" style={{ background: C.surface, border: `1px solid ${C.border}` }}>
         <div className="flex items-baseline justify-between mb-2">
-          <span style={{ color: C.mid, fontSize: 12, letterSpacing: 1.5, fontWeight: 700 }}>CALORIES</span>
+          <button
+            onClick={() => setProfileOpen(true)}
+            className="flex items-center gap-1"
+            aria-label="目標を設定"
+            style={{ color: C.mid }}
+          >
+            <span style={{ fontSize: 12, letterSpacing: 1.5, fontWeight: 700 }}>CALORIES</span>
+            <SlidersHorizontal size={12} color={C.accent} />
+          </button>
           <span style={{ fontVariantNumeric: "tabular-nums" }}>
             <span style={{ color: C.accent, fontSize: 22, fontWeight: 800 }}>{totals.kcal.toLocaleString()}</span>
             <span style={{ color: C.mid, fontSize: 13 }}> / {target.kcal.toLocaleString()} kcal</span>
@@ -340,6 +359,10 @@ export function MealScreen() {
 
       {draft && (
         <DraftSheet draft={draft} setDraft={setDraft} onSave={save} onCancel={() => setDraft(null)} errMsg={errMsg} />
+      )}
+
+      {profileOpen && (
+        <ProfileSheet initial={profile} onClose={() => setProfileOpen(false)} onSave={saveProfile} />
       )}
     </div>
   );

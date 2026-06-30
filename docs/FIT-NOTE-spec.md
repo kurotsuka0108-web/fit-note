@@ -198,7 +198,7 @@ const EXERCISE_LIBRARY_SEED = {
 |---|---|---|
 | 0 環境構築 | ✅ 完了 | Next.js 16 + TS + Tailwind v4 + next-themes + PWA manifest |
 | 1 NOTE (CRUD) | ✅ 完了 + 拡張 | 下記 9.2 の追加機能まで実装済み |
-| 2 ユーザー登録・PFC算出 | 🟡 認証のみ完了 | Supabase Auth（匿名＋メール）導入・RLSを auth.uid() に全面切替（下記 9.8）。AI目標PFC算出は未着手 |
+| 2 ユーザー登録・PFC算出 | ✅ 完了 | 認証（9.8）＋ 身体情報からAIが目標PFCを算出（9.9） |
 | 3 SHOKUJI (GPT-4o) | ✅ 完了 | 画面・画像正規化・解析→編集→確定・日次3回制限（サーバー側）まで実装。下記 9.7 |
 | 4 PWA仕上げ・README | ⬜ 一部のみ | manifest 済 |
 
@@ -313,3 +313,11 @@ const EXERCISE_LIBRARY_SEED = {
 - **要ダッシュボード設定**: Authentication で **Email**（"Confirm email" OFF 推奨）と **Anonymous sign-ins** を有効化。既存DBには `0007_auth.sql` の実行が必要。
 - **注意**: RLS 切替後、旧デモユーザー所有の既存データは新ユーザーから不可視（各自のアカウントで新規記録）。
 - **残タスク（フェーズ2後半）**: 身体情報入力 → AIが目標PFCを算出して profiles に保存（現状は既定値 2200/160/60/250。SHOKUJI ダッシュボードは profiles を読むので、保存すれば自動反映）。
+
+### 9.9 AI目標PFC算出（フェーズ2後半、仕様 §3.3 / §5）
+
+- **入力UI**: SHOKUJI ダッシュボードの「CALORIES」横のスライダーアイコンから `ProfileSheet`（`components/screens/meal/ProfileSheet.tsx`）を開く。身長・体重・年齢・性別・活動量（低/ふつう/高）・目標（減量/維持/増量）を入力。
+- **算出ルート**: `app/api/compute-targets/route.ts`。GPT に Mifflin-St Jeor 式＋活動係数（low1.4/mid1.55/high1.725）＋目標補正（増量+15%/維持±0/減量-20%）＋PFC配分（P=体重×2.0g、F=総kcalの25%、C=残り）で算出させ JSON 受領。**APIキー未設定・GPT失敗・極端値のときはサーバー側の決定論的計算（同式）にフォールバック**して必ず返す（`source: "ai" | "formula"`）。
+- **永続化**: `MealRepo.getProfile` / `saveProfile` を local / supabase に実装。supabase は profiles 行を `upsert`（id=auth.uid()）。保存すると `getTarget` が新目標を返し、ダッシュボードのバー基準が即更新される。
+- **DBマイグレーション不要**: profiles の身体情報・target_* 列は 0001 で作成済み。RLS は 0007 の `profiles_auth` がカバー。ダッシュボード追加設定は不要。
+- **残**: フェーズ4（PWA仕上げ・画像のStorage保存・DATA画面のプレミアム実装など）。
