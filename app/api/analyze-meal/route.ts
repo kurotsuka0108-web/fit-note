@@ -15,7 +15,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { getServerSupabase } from "@/lib/supabase/server";
-import { DEMO_USER_ID } from "@/lib/env";
 import { DAILY_AI_LIMIT } from "@/lib/db/meal-types";
 
 export const runtime = "nodejs"; // 画像を扱うので Edge ではなく Node ランタイム
@@ -102,11 +101,18 @@ export async function POST(req: NextRequest) {
   // クライアント表示用カウントに委ねる（仕様 §3.3 / §6）。
   const day = typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : new Date().toISOString().slice(0, 10);
   const sb = await getServerSupabase();
+  let userId: string | null = null;
   if (sb) {
+    const { data: auth } = await sb.auth.getUser();
+    if (!auth.user) {
+      return NextResponse.json({ error: "ログインが必要です" }, { status: 401 });
+    }
+    userId = auth.user.id;
+
     const { data: row, error } = await sb
       .from("ai_usage")
       .select("count")
-      .eq("user_id", DEMO_USER_ID)
+      .eq("user_id", userId)
       .eq("date", day)
       .maybeSingle();
     if (error) {
@@ -139,17 +145,17 @@ export async function POST(req: NextRequest) {
 
     // 解析成功時に日次カウントを +1（Supabase 構成時のみ。判定の正本はサーバー側）。
     let usage: { used: number; limit: number } | null = null;
-    if (sb) {
+    if (sb && userId) {
       const { data: cur } = await sb
         .from("ai_usage")
         .select("count")
-        .eq("user_id", DEMO_USER_ID)
+        .eq("user_id", userId)
         .eq("date", day)
         .maybeSingle();
       const next = (Number(cur?.count) || 0) + 1;
       const { error: upErr } = await sb
         .from("ai_usage")
-        .upsert({ user_id: DEMO_USER_ID, date: day, count: next, updated_at: new Date().toISOString() });
+        .upsert({ user_id: userId, date: day, count: next, updated_at: new Date().toISOString() });
       if (upErr) console.error("[analyze-meal] usage upsert", upErr);
       else usage = { used: next, limit: DAILY_AI_LIMIT };
     }

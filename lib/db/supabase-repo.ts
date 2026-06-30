@@ -1,10 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { DEMO_USER_ID } from "@/lib/env";
 import { BODY_PARTS } from "./seed";
 import type { Library, LastSession, NewSet, NoteRepo, SetStage, Unit, WorkoutLog, WorkoutSet } from "./types";
 
 // Supabase 実装。migration 0001_init_note.sql のスキーマに対応。
-// RLS はデモユーザー(DEMO_USER_ID)に限定（フェーズ2で auth.uid() に差し替え）。
+// RLS は auth.uid() ベース（フェーズ2）。user_id 列は default auth.uid() なので
+// 挿入時に本人IDが自動補完され、参照も RLS が本人の行へ自動で絞り込む。
 
 type LogRow = {
   id: string;
@@ -42,7 +42,7 @@ export class SupabaseNoteRepo implements NoteRepo {
     const { data, error } = await this.sb
       .from("exercises")
       .select("body_part,name,unit,interval_sec,created_at")
-      .or(`user_id.is.null,user_id.eq.${DEMO_USER_ID}`)
+      // RLS が「共通テンプレ(null) + 本人の行」に絞るため、明示フィルタは不要。
       .order("created_at", { ascending: true });
     if (error) throw error;
 
@@ -58,7 +58,7 @@ export class SupabaseNoteRepo implements NoteRepo {
   async addCustomExercise(part: string, name: string, unit: Unit): Promise<void> {
     const { error } = await this.sb
       .from("exercises")
-      .insert({ user_id: DEMO_USER_ID, body_part: part, name, unit, is_custom: true });
+      .insert({ body_part: part, name, unit, is_custom: true }); // user_id は default auth.uid()
     // 23505 = unique 制約違反（重複）。重複は無視する。
     if (error && error.code !== "23505") throw error;
   }
@@ -68,7 +68,7 @@ export class SupabaseNoteRepo implements NoteRepo {
     const { error } = await this.sb
       .from("exercises")
       .update({ interval_sec: Math.max(0, Math.round(intervalSec)) })
-      .eq("user_id", DEMO_USER_ID)
+      // RLS の update ポリシーが本人所有の行のみ許可（共通テンプレは対象外）。
       .eq("name", name);
     if (error) throw error;
   }
@@ -77,7 +77,6 @@ export class SupabaseNoteRepo implements NoteRepo {
     const { data, error } = await this.sb
       .from("workout_logs")
       .select(LOG_SELECT)
-      .eq("user_id", DEMO_USER_ID)
       .eq("date", date)
       .order("order", { ascending: true });
     if (error) throw error;
@@ -88,12 +87,11 @@ export class SupabaseNoteRepo implements NoteRepo {
     const { count } = await this.sb
       .from("workout_logs")
       .select("id", { count: "exact", head: true })
-      .eq("user_id", DEMO_USER_ID)
       .eq("date", date);
 
     const { data, error } = await this.sb
       .from("workout_logs")
-      .insert({ user_id: DEMO_USER_ID, date, name, body_part: part, order: count ?? 0, unit, interval_sec: Math.max(0, Math.round(intervalSec)) })
+      .insert({ date, name, body_part: part, order: count ?? 0, unit, interval_sec: Math.max(0, Math.round(intervalSec)) }) // user_id は default auth.uid()
       .select(LOG_SELECT)
       .single();
     if (error) throw error;
@@ -182,7 +180,6 @@ export class SupabaseNoteRepo implements NoteRepo {
     const { data, error } = await this.sb
       .from("workout_logs")
       .select(LOG_SELECT)
-      .eq("user_id", DEMO_USER_ID)
       .eq("name", name)
       .lt("date", date)
       .order("date", { ascending: false })
