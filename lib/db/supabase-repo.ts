@@ -83,6 +83,26 @@ export class SupabaseNoteRepo implements NoteRepo {
     return ((data ?? []) as unknown as LogRow[]).map(toLog);
   }
 
+  async getMonthParts(month: string): Promise<Record<string, string[]>> {
+    // month = "YYYY-MM"。[月初, 翌月初) の date・body_part を取得し日付ごとに集約。
+    const [y, m] = month.split("-").map(Number);
+    const start = `${month}-01`;
+    const end = `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, "0")}-01`;
+    const { data, error } = await this.sb
+      .from("workout_logs")
+      .select("date,body_part")
+      .gte("date", start)
+      .lt("date", end);
+    if (error) throw error;
+    const map: Record<string, Set<string>> = {};
+    for (const r of (data ?? []) as { date: string; body_part: string }[]) {
+      (map[r.date] ??= new Set()).add(r.body_part);
+    }
+    const out: Record<string, string[]> = {};
+    for (const [d, set] of Object.entries(map)) out[d] = Array.from(set);
+    return out;
+  }
+
   async addLog(date: string, name: string, part: string, unit: Unit, intervalSec: number): Promise<WorkoutLog> {
     const { count } = await this.sb
       .from("workout_logs")

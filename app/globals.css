@@ -54,6 +54,22 @@ body {
   }
 }
 
+/* 画面（タブ）切替時のフェードイン（P2）。key 変更で再生される。 */
+.fn-fade-in {
+  animation: fnFadeIn 0.26s ease;
+  will-change: transform, opacity;
+}
+@keyframes fnFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* スクロールバー非表示（端末風UI） */
 .fn-scroll::-webkit-scrollbar {
   width: 0;

@@ -145,11 +145,13 @@ function AppBody() {
     <Frame>
       <Header right={right} />
 
-      {/* body */}
+      {/* body（タブ切替で key が変わりフェードイン再生） */}
       <div className="flex-1 overflow-y-auto fn-scroll">
-        {tab === "note" && <NoteScreen />}
-        {tab === "meal" && <MealScreen />}
-        {tab === "data" && <DataScreen />}
+        <div key={tab} className="fn-fade-in">
+          {tab === "note" && <NoteScreen />}
+          {tab === "meal" && <MealScreen />}
+          {tab === "data" && <DataScreen />}
+        </div>
       </div>
 
       {/* global nav */}

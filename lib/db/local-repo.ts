@@ -96,6 +96,18 @@ export class LocalNoteRepo implements NoteRepo {
       }));
   }
 
+  async getMonthParts(month: string): Promise<Record<string, string[]>> {
+    // month = "YYYY-MM"。日付ごとに実施部位を重複なしで集める。
+    const map: Record<string, Set<string>> = {};
+    for (const l of load().logs) {
+      if (!l.date.startsWith(`${month}-`)) continue;
+      (map[l.date] ??= new Set()).add(l.part);
+    }
+    const out: Record<string, string[]> = {};
+    for (const [d, set] of Object.entries(map)) out[d] = Array.from(set);
+    return out;
+  }
+
   async addLog(date: string, name: string, part: string, unit: Unit, intervalSec: number): Promise<WorkoutLog> {
     const store = load();
     const sameDay = store.logs.filter((l) => l.date === date);

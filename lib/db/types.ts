@@ -50,6 +50,11 @@ export interface NoteRepo {
 
   /** 指定日の種目ログ（セット込み）を order 昇順で返す */
   getLogs(date: string): Promise<WorkoutLog[]>;
+  /**
+   * 指定月（YYYY-MM）について、記録がある日付ごとに実施した部位の一覧を返す。
+   * 例: { "2026-07-01": ["胸","腕"], ... }。カレンダーの部位別フィルタ用。
+   */
+  getMonthParts(month: string): Promise<Record<string, string[]>>;
   /** 当日ログに種目を追加して、作成したログを返す */
   addLog(date: string, name: string, part: string, unit: Unit, intervalSec: number): Promise<WorkoutLog>;
   /** 種目ログを削除（セットも連動削除） */
