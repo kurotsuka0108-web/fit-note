@@ -4,8 +4,24 @@
 // 記録のソース: ai=写真解析由来 / manual=手入力。
 export type MealSource = "ai" | "manual";
 
-// 目標 PFC（フェーズ2で AI 算出値に置換。当面は profiles の既定値）。
+// 目標 PFC（フェーズ2: 身体情報から AI が算出して profiles に保存）。
 export type TargetPFC = { kcal: number; p: number; f: number; c: number };
+
+// プロフィール（身体情報）。AI 目標算出の入力（仕様 §5 profiles）。
+export type Sex = "male" | "female";
+export type ActivityLevel = "low" | "mid" | "high"; // デスクワーク中心 / 週1-3運動 / 週4以上・肉体労働
+export type Goal = "増量" | "維持" | "減量";
+
+export type ProfileInput = {
+  height: number | null; // cm
+  weight: number | null; // kg
+  age: number | null;
+  sex: Sex | null;
+  activityLevel: ActivityLevel | null;
+  goal: Goal | null;
+};
+
+export type Profile = ProfileInput & { target: TargetPFC };
 
 // 1食の記録。
 export type Meal = {
@@ -55,6 +71,11 @@ export interface MealRepo {
 
   /** 目標 PFC を返す（profiles の値。無ければ既定値） */
   getTarget(): Promise<TargetPFC>;
+
+  /** プロフィール（身体情報＋目標）を返す。未設定なら null */
+  getProfile(): Promise<Profile | null>;
+  /** プロフィール（身体情報＋AI算出の目標）を保存する */
+  saveProfile(profile: Profile): Promise<void>;
 
   /** 指定日の AI 利用状況（表示用）。判定の正本はサーバー側（analyze-meal ルート） */
   getUsage(date: string): Promise<AiUsage>;

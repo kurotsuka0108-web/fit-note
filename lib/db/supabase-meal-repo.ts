@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { TARGET } from "@/lib/theme";
-import { DAILY_AI_LIMIT, type AiUsage, type Meal, type MealRepo, type MealSource, type NewMeal, type TargetPFC } from "./meal-types";
+import { DAILY_AI_LIMIT, type ActivityLevel, type AiUsage, type Goal, type Meal, type MealRepo, type MealSource, type NewMeal, type Profile, type Sex, type TargetPFC } from "./meal-types";
 
 // Supabase 実装。migration 0006_meals.sql（meals・ai_usage）に対応。
 // RLS は auth.uid() ベース（フェーズ2）。user_id は default auth.uid() で自動補完。
@@ -103,6 +103,49 @@ export class SupabaseMealRepo implements MealRepo {
       f: Number(data.target_f) || TARGET.f,
       c: Number(data.target_c) || TARGET.c,
     };
+  }
+
+  async getProfile(): Promise<Profile | null> {
+    const { data, error } = await this.sb
+      .from("profiles")
+      .select("height,weight,age,sex,activity_level,goal,target_kcal,target_p,target_f,target_c")
+      // RLS が本人の profiles 行のみ返す。
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return null;
+    return {
+      height: data.height != null ? Number(data.height) : null,
+      weight: data.weight != null ? Number(data.weight) : null,
+      age: data.age != null ? Number(data.age) : null,
+      sex: (data.sex as Sex) ?? null,
+      activityLevel: (data.activity_level as ActivityLevel) ?? null,
+      goal: (data.goal as Goal) ?? null,
+      target: {
+        kcal: Number(data.target_kcal) || TARGET.kcal,
+        p: Number(data.target_p) || TARGET.p,
+        f: Number(data.target_f) || TARGET.f,
+        c: Number(data.target_c) || TARGET.c,
+      },
+    };
+  }
+
+  async saveProfile(profile: Profile): Promise<void> {
+    const { data: auth } = await this.sb.auth.getUser();
+    if (!auth.user) throw new Error("ログインが必要です");
+    const { error } = await this.sb.from("profiles").upsert({
+      id: auth.user.id,
+      height: profile.height,
+      weight: profile.weight,
+      age: profile.age,
+      sex: profile.sex,
+      activity_level: profile.activityLevel,
+      goal: profile.goal,
+      target_kcal: profile.target.kcal,
+      target_p: profile.target.p,
+      target_f: profile.target.f,
+      target_c: profile.target.c,
+    });
+    if (error) throw error;
   }
 
   async getUsage(date: string): Promise<AiUsage> {

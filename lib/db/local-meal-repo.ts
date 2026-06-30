@@ -1,5 +1,5 @@
 import { TARGET } from "@/lib/theme";
-import { DAILY_AI_LIMIT, type AiUsage, type Meal, type MealRepo, type NewMeal, type TargetPFC } from "./meal-types";
+import { DAILY_AI_LIMIT, type AiUsage, type Meal, type MealRepo, type NewMeal, type Profile, type TargetPFC } from "./meal-types";
 
 // Supabase 未設定時のフォールバック。ブラウザの localStorage に永続化する。
 // （NOTE の LocalNoteRepo と同じ方針。リロードしても残る）
@@ -9,6 +9,7 @@ const KEY = "fitnote.meal.v1";
 type Store = {
   meals: Meal[]; // 全日付の食事
   usage: Record<string, number>; // 日付 => AI 解析回数
+  profile?: Profile; // 身体情報＋目標PFC
 };
 
 const uid = (): string =>
@@ -65,7 +66,17 @@ export class LocalMealRepo implements MealRepo {
   }
 
   async getTarget(): Promise<TargetPFC> {
-    return { ...TARGET };
+    return { ...(load().profile?.target ?? TARGET) };
+  }
+
+  async getProfile(): Promise<Profile | null> {
+    return load().profile ?? null;
+  }
+
+  async saveProfile(profile: Profile): Promise<void> {
+    const store = load();
+    store.profile = profile;
+    save(store);
   }
 
   async getUsage(date: string): Promise<AiUsage> {
