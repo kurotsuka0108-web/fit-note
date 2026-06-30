@@ -33,8 +33,47 @@ function toMeal(row: MealRow): Meal {
 
 const MEAL_SELECT = "id,date,dish,kcal,p,f,c,image_path,source";
 
+// 食事写真を入れる private バケット（migration 0008）。
+const BUCKET = "meal-images";
+// 署名URLの有効期限（秒）。ダッシュボード表示用なのでリロードで再発行されれば十分。
+const SIGNED_URL_TTL = 60 * 60;
+
+// image_path が Storage のオブジェクトパスか（= 署名が必要か）を判定。
+// 旧データの data URL や外部 http(s) URL はそのまま表示するため除外する。
+function isStoragePath(s: string): boolean {
+  return !s.startsWith("data:") && !s.startsWith("http://") && !s.startsWith("https://");
+}
+
 export class SupabaseMealRepo implements MealRepo {
   constructor(private sb: SupabaseClient) {}
+
+  // data URL を Storage にアップロードし、保存したオブジェクトのパスを返す。
+  private async uploadImage(dataUrl: string): Promise<string> {
+    const { data: auth } = await this.sb.auth.getUser();
+    if (!auth.user) throw new Error("ログインが必要です");
+    const blob = await (await fetch(dataUrl)).blob(); // data URL → Blob
+    const path = `${auth.user.id}/${crypto.randomUUID()}.jpg`;
+    const { error } = await this.sb.storage
+      .from(BUCKET)
+      .upload(path, blob, { contentType: "image/jpeg", upsert: false });
+    if (error) throw error;
+    return path;
+  }
+
+  // Storage パスを表示用の署名URLに変換。
+  private async signPath(path: string): Promise<string | null> {
+    const { data } = await this.sb.storage.from(BUCKET).createSignedUrl(path, SIGNED_URL_TTL);
+    return data?.signedUrl ?? null;
+  }
+
+  // 指定 meal が持つ既存の Storage オブジェクトを削除（差し替え・削除時の孤児防止）。
+  private async deleteExistingImage(id: string): Promise<void> {
+    const { data } = await this.sb.from("meals").select("image_path").eq("id", id).maybeSingle();
+    const p = (data as { image_path: string | null } | null)?.image_path;
+    if (p && isStoragePath(p)) {
+      await this.sb.storage.from(BUCKET).remove([p]);
+    }
+  }
 
   async getMeals(date: string): Promise<Meal[]> {
     const { data, error } = await this.sb
@@ -43,10 +82,28 @@ export class SupabaseMealRepo implements MealRepo {
       .eq("date", date)
       .order("created_at", { ascending: false });
     if (error) throw error;
-    return ((data ?? []) as unknown as MealRow[]).map(toMeal);
+    const meals = ((data ?? []) as unknown as MealRow[]).map(toMeal);
+
+    // Storage パスをまとめて署名URLへ変換（data URL の旧データはそのまま）。
+    const paths = meals
+      .map((m) => m.image)
+      .filter((img): img is string => !!img && isStoragePath(img));
+    if (paths.length > 0) {
+      const { data: signed } = await this.sb.storage.from(BUCKET).createSignedUrls(paths, SIGNED_URL_TTL);
+      const map = new Map<string, string>();
+      (signed ?? []).forEach((s) => {
+        if (s.path && s.signedUrl) map.set(s.path, s.signedUrl);
+      });
+      for (const m of meals) {
+        if (m.image && isStoragePath(m.image)) m.image = map.get(m.image) ?? null;
+      }
+    }
+    return meals;
   }
 
   async addMeal(date: string, meal: NewMeal): Promise<Meal> {
+    // 新規写真（data URL）のみ Storage へアップロード。null はそのまま。
+    const imagePath = meal.image?.startsWith("data:") ? await this.uploadImage(meal.image) : null;
     const { data, error } = await this.sb
       .from("meals")
       .insert({
@@ -56,35 +113,58 @@ export class SupabaseMealRepo implements MealRepo {
         p: meal.p,
         f: meal.f,
         c: meal.c,
-        image_path: meal.image,
+        image_path: imagePath,
         source: meal.source,
       })
       .select(MEAL_SELECT)
       .single();
     if (error) throw error;
-    return toMeal(data as unknown as MealRow);
+    const created = toMeal(data as unknown as MealRow);
+    // 追加直後の表示用に署名URLへ。
+    if (imagePath) created.image = (await this.signPath(imagePath)) ?? meal.image;
+    return created;
   }
 
   async updateMeal(id: string, meal: NewMeal): Promise<Meal> {
+    // 画像の扱いを3分岐:
+    //   - data URL: 新しい写真 → 旧オブジェクト削除＋アップロード
+    //   - null: 写真削除 → 旧オブジェクト削除＋ image_path を null に
+    //   - それ以外（署名URL = 未変更）: image_path は触らない
+    const update: Record<string, unknown> = {
+      dish: meal.dish,
+      kcal: meal.kcal,
+      p: meal.p,
+      f: meal.f,
+      c: meal.c,
+      source: meal.source,
+    };
+    let newImagePath: string | null = null;
+    if (meal.image == null) {
+      await this.deleteExistingImage(id);
+      update.image_path = null;
+    } else if (meal.image.startsWith("data:")) {
+      await this.deleteExistingImage(id);
+      newImagePath = await this.uploadImage(meal.image);
+      update.image_path = newImagePath;
+    }
+
     const { data, error } = await this.sb
       .from("meals")
-      .update({
-        dish: meal.dish,
-        kcal: meal.kcal,
-        p: meal.p,
-        f: meal.f,
-        c: meal.c,
-        image_path: meal.image,
-        source: meal.source,
-      })
+      .update(update)
       .eq("id", id)
       .select(MEAL_SELECT)
       .single();
     if (error) throw error;
-    return toMeal(data as unknown as MealRow);
+    const updated = toMeal(data as unknown as MealRow);
+    // 表示用に署名URLへ（未変更なら image_path は既存の Storage パスのまま）。
+    if (updated.image && isStoragePath(updated.image)) {
+      updated.image = (await this.signPath(updated.image)) ?? null;
+    }
+    return updated;
   }
 
   async removeMeal(id: string): Promise<void> {
+    await this.deleteExistingImage(id); // Storage の孤児を残さない
     const { error } = await this.sb.from("meals").delete().eq("id", id);
     if (error) throw error;
   }

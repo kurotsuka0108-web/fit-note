@@ -32,7 +32,8 @@ export type Meal = {
   p: number; // タンパク質 (g)
   f: number; // 脂質 (g)
   c: number; // 炭水化物 (g)
-  // サムネイル。local は data URL を直接保持、supabase は Storage パス/URL（フェーズ4で本対応）。
+  // サムネイルの表示用URL。local は data URL を直接保持、supabase は Storage に
+  // アップロードした上で表示時に署名URLを発行（フェーズ4で対応。旧 data URL も後方互換）。
   image: string | null;
   source: MealSource;
 };
