@@ -2,6 +2,7 @@
 
 import { ThemeProvider } from "next-themes";
 import { AuthProvider } from "@/lib/auth";
+import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 
 /**
  * アプリ全体のクライアントプロバイダ。
@@ -19,6 +20,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       themes={["dark", "light"]}
     >
       <AuthProvider>{children}</AuthProvider>
+      <ServiceWorkerRegister />
     </ThemeProvider>
   );
 }
