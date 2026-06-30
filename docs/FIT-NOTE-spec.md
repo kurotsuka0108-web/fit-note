@@ -200,7 +200,7 @@ const EXERCISE_LIBRARY_SEED = {
 | 1 NOTE (CRUD) | ✅ 完了 + 拡張 | 下記 9.2 の追加機能まで実装済み |
 | 2 ユーザー登録・PFC算出 | ✅ 完了 | 認証（9.8）＋ 身体情報からAIが目標PFCを算出（9.9） |
 | 3 SHOKUJI (GPT-4o) | ✅ 完了 | 画面・画像正規化・解析→編集→確定・日次3回制限（サーバー側）まで実装。下記 9.7 |
-| 4 PWA仕上げ・README | ⬜ 一部のみ | manifest 済 |
+| 4 PWA仕上げ・README | ✅ 完了 | アイコン一式・オフラインSW・写真Storage保存・設定画面・履歴カレンダー・デザイン仕上げ。下記 9.10 |
 
 ### 9.2 NOTE 画面の追加実装（仕様 §3.2 を超える部分）
 
@@ -320,4 +320,13 @@ const EXERCISE_LIBRARY_SEED = {
 - **算出ルート**: `app/api/compute-targets/route.ts`。GPT に Mifflin-St Jeor 式＋活動係数（low1.4/mid1.55/high1.725）＋目標補正（増量+15%/維持±0/減量-20%）＋PFC配分（P=体重×2.0g、F=総kcalの25%、C=残り）で算出させ JSON 受領。**APIキー未設定・GPT失敗・極端値のときはサーバー側の決定論的計算（同式）にフォールバック**して必ず返す（`source: "ai" | "formula"`）。
 - **永続化**: `MealRepo.getProfile` / `saveProfile` を local / supabase に実装。supabase は profiles 行を `upsert`（id=auth.uid()）。保存すると `getTarget` が新目標を返し、ダッシュボードのバー基準が即更新される。
 - **DBマイグレーション不要**: profiles の身体情報・target_* 列は 0001 で作成済み。RLS は 0007 の `profiles_auth` がカバー。ダッシュボード追加設定は不要。
-- **残**: フェーズ4（PWA仕上げ・画像のStorage保存・DATA画面のプレミアム実装など）。
+
+### 9.10 フェーズ4（PWA仕上げ・Storage・設定・履歴カレンダー）
+
+- **PWAアイコン**: `scripts/generate-icons.mjs` がマスター `scripts/icon-source.png`（FIT·NOTE ノートブックアイコン）から 192/512・maskable・apple-touch・favicon を生成。`manifest.ts` / `layout.tsx` で参照。`npm run icons` で再生成。
+- **オフライン対応**: `public/sw.js`（ナビ=network-first→オフライン時アプリシェル、静的=stale-while-revalidate、`/api/*`はネットワーク専用）。`components/ServiceWorkerRegister.tsx` が**本番のみ登録**（dev は HMR 競合回避のため未登録、既存SWは解除）。`next.config.ts` で `/sw.js` に no-cache ヘッダ。
+- **写真の Supabase Storage 保存**: data URL 直保存をやめ、private バケット `meal-images` に `<uid>/<uuid>.jpg` でアップロード、`meals.image_path` にはパスを保存。表示時に署名URL発行（`createSignedUrls`、TTL 1h）。差し替え・削除時は旧オブジェクトも削除。旧 data URL 行は後方互換で表示。マイグレーション `0008_meal_images.sql`（バケット＋本人フォルダのみの RLS）。local モードは現状維持。
+- **設定画面**: ヘッダー右上を歯車に集約 → `components/SettingsSheet.tsx`。ナイトモード（next-themes）/ 自動インターバルタイマー / バイブレーション / ログアウト / アプリ情報。設定は `lib/settings.tsx`（localStorage 永続化）。NOTE は自動インターバル設定を、TimerOverlay は振動設定を参照。
+- **DATA = 筋トレ履歴カレンダー（無料）**: 年月カレンダー＋部位別フィルタ（全て/胸/…）。記録日にドット、日付タップでその日の種目（部位・セット数・トップセット）を表示。`NoteRepo.getMonthParts(month)`（日付→部位一覧、local/supabase 実装）と `lib/date.ts` の `monthMatrix` を追加。
+- **デザイン仕上げ**: 全ボタンに hover/active/transition（globals.css）、タブ切替フェードイン、設定シートのスライドアップ、ステータスバー実時間化。
+- **将来構想**: マネタイズ（フリーミアム・サブスク）案は別途検討中（AI解析無制限・分析ダッシュボード・Stripe）。実装は未着手。
