@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
 import { THEMES, type Tokens } from "@/lib/theme";
+import { useHasMounted } from "@/lib/use-mounted";
 
 /**
  * 現在のテーマのデザイントークンを返すフック。
@@ -14,7 +14,6 @@ import { THEMES, type Tokens } from "@/lib/theme";
  */
 export function useC(): Tokens {
   const { resolvedTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useHasMounted();
   return THEMES[mounted && resolvedTheme === "light" ? "light" : "dark"];
 }

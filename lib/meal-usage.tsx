@@ -16,13 +16,11 @@ const MealUsageCtx = createContext<Ctx | null>(null);
 export function MealUsageProvider({ children }: { children: ReactNode }) {
   const [usage, setUsage] = useState<UsageState>({ used: 0, limit: DAILY_AI_LIMIT, ready: false });
 
-  const refresh = useCallback(async () => {
-    try {
-      const u = await getMealRepo().getUsage(todayYmd());
-      setUsage({ used: u.used, limit: u.limit, ready: true });
-    } catch {
-      setUsage((p) => ({ ...p, ready: true }));
-    }
+  const refresh = useCallback(() => {
+    return getMealRepo()
+      .getUsage(todayYmd())
+      .then((u) => setUsage({ used: u.used, limit: u.limit, ready: true }))
+      .catch(() => setUsage((p) => ({ ...p, ready: true })));
   }, []);
 
   useEffect(() => {

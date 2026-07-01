@@ -114,7 +114,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ...fallback, source: "formula" });
     }
     return NextResponse.json({ kcal, p, f, c, source: "ai" });
-  } catch (err: any) {
+  } catch (err) {
     console.error("[compute-targets]", err);
     // GPT 失敗時も決定論的計算で必ず返す。
     return NextResponse.json({ ...fallback, source: "formula" });

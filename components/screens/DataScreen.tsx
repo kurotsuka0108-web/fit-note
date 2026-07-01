@@ -20,8 +20,9 @@ export function DataScreen() {
   const [monthParts, setMonthParts] = useState<Record<string, string[]>>({});
   const [filter, setFilter] = useState<string>("全て"); // "全て" or 部位名
   const [selected, setSelected] = useState<string>(todayYmd());
-  const [dayLogs, setDayLogs] = useState<WorkoutLog[] | null>(null);
-  const [loadingDay, setLoadingDay] = useState(false);
+  // 取得済みログはどの日付のものかを date と一緒に保持し、selected と食い違う間は読み込み中とみなす
+  const [dayLogs, setDayLogs] = useState<{ date: string; logs: WorkoutLog[] } | null>(null);
+  const loadingDay = dayLogs?.date !== selected;
 
   // 表示中の月の「日付→部位一覧」を取得
   useEffect(() => {
@@ -42,8 +43,9 @@ export function DataScreen() {
   // 選択日の詳細を取得
   useEffect(() => {
     let alive = true;
-    setLoadingDay(true);
-    repo.getLogs(selected).then((ls) => alive && setDayLogs(ls)).catch(() => alive && setDayLogs([])).finally(() => { if (alive) setLoadingDay(false); });
+    repo.getLogs(selected)
+      .then((ls) => { if (alive) setDayLogs({ date: selected, logs: ls }); })
+      .catch(() => { if (alive) setDayLogs({ date: selected, logs: [] }); });
     return () => { alive = false; };
   }, [repo, selected]);
 
@@ -63,7 +65,10 @@ export function DataScreen() {
   })();
 
   // 部位フィルタ中は、その日の中でも対象部位の種目だけ表示する
-  const shownLogs = dayLogs ? (filter === "全て" ? dayLogs : dayLogs.filter((l) => l.part === filter)) : null;
+  const logsForSelected = dayLogs?.date === selected ? dayLogs.logs : null;
+  const shownLogs = logsForSelected
+    ? (filter === "全て" ? logsForSelected : logsForSelected.filter((l) => l.part === filter))
+    : null;
 
   return (
     <div className="px-5 pt-4 pb-8">

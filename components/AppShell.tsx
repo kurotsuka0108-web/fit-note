@@ -170,7 +170,7 @@ function AppBody() {
         </div>
       </div>
 
-      {/* global nav */}
+      {/* 共通ナビ */}
       <div className="flex" style={{ flexShrink: 0, borderTop: `1px solid ${C.border}`, background: C.bg }}>
         {NAV.map(({ key, label, Icon }) => {
           const on = tab === key;

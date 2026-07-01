@@ -95,7 +95,9 @@ export function NoteScreen() {
   >(null);
   // 直近に組んだドロップ構成を種目ごとに記憶（次セットの初期値として復元し再入力を省く）
   const [lastDrop, setLastDrop] = useState<Record<string, { bodyweight: boolean; stages: { weight: number; reps: number }[] }>>({});
-  const [loading, setLoading] = useState(true);
+  // 直近に loadDay が反映し終えた日付。active と食い違う間は読み込み中とみなす
+  const [loadedDate, setLoadedDate] = useState<string | null>(null);
+  const loading = loadedDate !== active;
   const [err, setErr] = useState("");
   const [timer, setTimer] = useState<TimerState | null>(null);
   const timerSeq = useRef(0);
@@ -129,26 +131,24 @@ export function NoteScreen() {
     repo.getLibrary().then(setLibrary).catch(fail);
   }, [repo]);
 
-  // 選択日のログ・ドラフト・前回実績をロード
+  // 選択日のログ・ドラフト・前回実績をロード（.then チェーンで組み、setState をエフェクト本体から
+  // 直接ではなくコールバック内で呼ぶことでカスケード再レンダリングを避ける）
   const loadDay = useCallback(
-    async (date: string) => {
-      setLoading(true);
-      try {
-        const dayLogs = await repo.getLogs(date);
-        const d: Record<string, Draft> = {};
-        for (const l of dayLogs) d[l.id] = draftFor(l);
-        setLogs(dayLogs);
-        setDrafts(d);
-        // 前回実績は種目ごとに取得
-        const entries = await Promise.all(
-          dayLogs.map(async (l) => [l.id, await repo.getLastSession(date, l.name)] as const),
-        );
-        setLasts(Object.fromEntries(entries));
-      } catch (e) {
-        fail(e);
-      } finally {
-        setLoading(false);
-      }
+    (date: string) => {
+      return repo
+        .getLogs(date)
+        .then((dayLogs) => {
+          const d: Record<string, Draft> = {};
+          for (const l of dayLogs) d[l.id] = draftFor(l);
+          setLogs(dayLogs);
+          setDrafts(d);
+          // 前回実績は種目ごとに取得
+          return Promise.all(
+            dayLogs.map(async (l) => [l.id, await repo.getLastSession(date, l.name)] as const),
+          ).then((entries) => setLasts(Object.fromEntries(entries)));
+        })
+        .catch(fail)
+        .finally(() => setLoadedDate(date));
     },
     [repo],
   );

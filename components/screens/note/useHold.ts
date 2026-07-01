@@ -14,7 +14,9 @@ const MOVE_THRESHOLD = 8;
  */
 export function useHold(onStep: () => void) {
   const cb = useRef(onStep);
-  cb.current = onStep;
+  useEffect(() => {
+    cb.current = onStep;
+  }, [onStep]);
   const timeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const interval = useRef<ReturnType<typeof setInterval> | null>(null);
   const held = useRef(false); // 加速連打に入ったか（入った場合は離しても追加ステップしない）

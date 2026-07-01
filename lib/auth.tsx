@@ -37,13 +37,10 @@ function humanize(msg: string): string {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const sb = useMemo(() => getBrowserSupabase(), []);
   const [user, setUser] = useState<User | null>(null);
-  const [ready, setReady] = useState(false);
+  const [ready, setReady] = useState(() => !sb); // local モードはログイン不要のため初期値から ready
 
   useEffect(() => {
-    if (!sb) {
-      setReady(true); // local モードはログイン不要
-      return;
-    }
+    if (!sb) return;
     sb.auth.getSession().then(({ data }) => {
       setUser(data.session?.user ?? null);
       setReady(true);

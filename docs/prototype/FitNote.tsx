@@ -34,7 +34,9 @@ const TARGET = { kcal: 2200, p: 160, f: 60, c: 250 };
 /* ------------------------------------------------------------------ */
 function useHold(onStep) {
   const cb = useRef(onStep);
-  cb.current = onStep;
+  useEffect(() => {
+    cb.current = onStep;
+  }, [onStep]);
   const t = useRef(null);
   const iv = useRef(null);
 
@@ -434,7 +436,7 @@ async function processImage(file, maxDim = 1024, quality = 0.85) {
   let bitmap;
   try {
     bitmap = await createImageBitmap(file);
-  } catch (e) {
+  } catch {
     throw new Error("画像をデコードできませんでした（HEIC等の可能性）");
   }
   const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
@@ -817,7 +819,7 @@ export default function App() {
             {tab === "data" && <DataScreen />}
           </div>
 
-          {/* global nav */}
+          {/* 共通ナビ */}
           <div className="flex" style={{ flexShrink: 0, borderTop: `1px solid ${C.border}`, background: C.bg }}>
             {nav.map(({ key, label, Icon }) => {
               const on = tab === key;

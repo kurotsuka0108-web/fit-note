@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
 import { Info, LogOut, Moon, Timer, Vibrate, X } from "lucide-react";
 import { useC } from "@/lib/use-tokens";
 import { useSettings } from "@/lib/settings";
 import { useAuth } from "@/lib/auth";
+import { useHasMounted } from "@/lib/use-mounted";
 import { FramePortal } from "@/components/screens/note/FramePortal";
 
 const APP_VERSION = "0.1.0";
@@ -83,8 +83,7 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
   const { autoIntervalTimer, vibration, set } = useSettings();
   const { supabase, signOut } = useAuth();
   const { resolvedTheme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useHasMounted();
   const isDark = !mounted || resolvedTheme !== "light";
 
   return (

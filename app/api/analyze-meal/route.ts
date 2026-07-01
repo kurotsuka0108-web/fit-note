@@ -161,13 +161,11 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ ...analysis, usage });
-  } catch (err: any) {
+  } catch (err) {
     console.error("[analyze-meal]", err);
-    const status = typeof err?.status === "number" ? err.status : 500;
-    return NextResponse.json(
-      { error: err?.message ?? "解析に失敗しました" },
-      { status },
-    );
+    const status = err instanceof OpenAI.APIError && typeof err.status === "number" ? err.status : 500;
+    const message = err instanceof Error ? err.message : "解析に失敗しました";
+    return NextResponse.json({ error: message }, { status });
   }
 }
 

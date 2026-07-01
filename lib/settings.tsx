@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useSyncExternalStore } from "react";
 
 /**
  * アプリ設定（フェーズ4-D）。localStorage に永続化する軽量ストア。
@@ -16,6 +16,49 @@ export type Settings = {
 const DEFAULTS: Settings = { autoIntervalTimer: true, vibration: true };
 const KEY = "fitnote.settings.v1";
 
+// localStorage を外部ストアとして useSyncExternalStore で購読する。
+// SSR・初回クライアントレンダーは既定値（ハイドレーション不一致を避ける）。
+const listeners = new Set<() => void>();
+let cachedRaw: string | null = null;
+let cachedSettings: Settings = DEFAULTS;
+
+function readSettings(): Settings {
+  let raw: string | null;
+  try {
+    raw = localStorage.getItem(KEY);
+  } catch {
+    raw = null;
+  }
+  if (raw !== cachedRaw) {
+    cachedRaw = raw;
+    try {
+      cachedSettings = raw ? { ...DEFAULTS, ...JSON.parse(raw) } : DEFAULTS;
+    } catch {
+      cachedSettings = DEFAULTS; // 破損時は既定値
+    }
+  }
+  return cachedSettings;
+}
+
+function writeSettings(next: Settings): void {
+  const raw = JSON.stringify(next);
+  try {
+    localStorage.setItem(KEY, raw);
+  } catch {
+    /* 保存失敗は無視（プライベートモード等） */
+  }
+  cachedRaw = raw;
+  cachedSettings = next;
+  listeners.forEach((l) => l());
+}
+
+function subscribe(onChange: () => void): () => void {
+  listeners.add(onChange);
+  return () => listeners.delete(onChange);
+}
+
+const getServerSnapshot = () => DEFAULTS;
+
 type SettingsContextValue = Settings & {
   set: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
 };
@@ -23,28 +66,10 @@ type SettingsContextValue = Settings & {
 const SettingsContext = createContext<SettingsContextValue | null>(null);
 
 export function SettingsProvider({ children }: { children: React.ReactNode }) {
-  // SSR・初回は既定値。マウント後に localStorage から復元（ハイドレーション不一致を避ける）。
-  const [settings, setSettings] = useState<Settings>(DEFAULTS);
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(KEY);
-      if (raw) setSettings({ ...DEFAULTS, ...JSON.parse(raw) });
-    } catch {
-      /* 破損時は既定値のまま */
-    }
-  }, []);
+  const settings = useSyncExternalStore(subscribe, readSettings, getServerSnapshot);
 
   const set: SettingsContextValue["set"] = (key, value) => {
-    setSettings((prev) => {
-      const next = { ...prev, [key]: value };
-      try {
-        localStorage.setItem(KEY, JSON.stringify(next));
-      } catch {
-        /* 保存失敗は無視（プライベートモード等） */
-      }
-      return next;
-    });
+    writeSettings({ ...readSettings(), [key]: value });
   };
 
   return (
